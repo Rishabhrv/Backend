@@ -1,0 +1,40 @@
+name: Deploy Ebook Backend
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 178.16.137.226
+          username: rishabhvyas
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Navigate to the Backend folder
+            cd /home/rishabhvyas/EbookApp/Backend
+            
+            # Update code
+            git pull origin main
+            
+            # Initialize NVM for Node 24
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            nvm use 24.2.0
+
+            # Install dependencies (production only to keep it light)
+            npm install --production
+            
+            # Restart only the backend process
+            pm2 restart api-backend-ebook || pm2 start server.js --name "api-backend-ebook"
+            
+            echo "✅ Backend Deployment Successful!"
