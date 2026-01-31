@@ -355,14 +355,14 @@ router.get("/slug/:slug", (req, res) => {
       p.product_type,
       p.main_image,
 
-      sd.weight,
-      sd.length,
-      sd.width,
-      sd.height,
-
-      e.file_path AS ebook_path,
-      e.price AS ebook_price,
-      e.sell_price AS ebook_sell_price,
+      MAX(sd.weight) AS weight,
+      MAX(sd.length) AS length,
+      MAX(sd.width) AS width,
+      MAX(sd.height) AS height,
+      
+      MAX(e.file_path) AS ebook_path,
+      MAX(e.price) AS ebook_price,
+      MAX(e.sell_price) AS ebook_sell_price,
 
       GROUP_CONCAT(DISTINCT a.id) AS author_ids,
       GROUP_CONCAT(DISTINCT a.name) AS author_names,
@@ -373,15 +373,15 @@ router.get("/slug/:slug", (req, res) => {
       GROUP_CONCAT(DISTINCT c.name) AS category_names,
       GROUP_CONCAT(DISTINCT c.slug) AS category_slugs
 
-    FROM products p
-    LEFT JOIN shipping_details sd ON sd.product_id = p.id
-    LEFT JOIN ebooks e ON e.product_id = p.id
-    LEFT JOIN product_authors pa ON pa.product_id = p.id
-    LEFT JOIN authors a ON a.id = pa.author_id
-    LEFT JOIN product_categories pc ON pc.product_id = p.id
-    LEFT JOIN categories c ON c.id = pc.category_id
-    WHERE p.slug = ?
-    GROUP BY p.id
+      FROM products p
+      LEFT JOIN shipping_details sd ON sd.product_id = p.id
+      LEFT JOIN ebooks e ON e.product_id = p.id
+      LEFT JOIN product_authors pa ON pa.product_id = p.id
+      LEFT JOIN authors a ON a.id = pa.author_id
+      LEFT JOIN product_categories pc ON pc.product_id = p.id
+      LEFT JOIN categories c ON c.id = pc.category_id
+      WHERE p.slug = ?
+      GROUP BY p.id
   `;
 
   db.query(sql, [slug], (err, rows) => {
@@ -466,7 +466,7 @@ router.get("/slug/:slug", (req, res) => {
           }
         );
       }
-    );
+    ); 
   }); 
 });
 
