@@ -467,7 +467,7 @@ router.get("/slug/:slug", (req, res) => {
         );
       }
     );
-  });
+  }); 
 });
 
 
