@@ -33,6 +33,7 @@ app.use("/api/admin", require("./routes/users"));
 app.use("/api/admin", require("./routes/adminOrders"));
 
 app.use("/api/mylibrary", require("./routes/mylibrary"));
+app.use("/api/payment-history", require("./routes/payment-history"));
 
 
 app.listen(PORT, () => {

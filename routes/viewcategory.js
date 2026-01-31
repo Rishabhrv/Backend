@@ -34,10 +34,12 @@ router.get("/", (req, res) => {
 ====================================================== */
 router.get("/:slug/products", (req, res) => {
   const { slug } = req.params;
-
   const {
     min = 0,
     max = 999999,
+    search = "",
+    rating = 0,
+    author = "",
     sort = "latest",
     page = 1,
     limit = 12,
@@ -49,142 +51,254 @@ router.get("/:slug/products", (req, res) => {
   if (sort === "price_low") orderBy = "p.sell_price ASC";
   if (sort === "price_high") orderBy = "p.sell_price DESC";
 
-  const sql = `
-    SELECT 
-      SQL_CALC_FOUND_ROWS
+  const productSql = `
+    SELECT
       p.id,
       p.title,
       p.slug,
       p.price,
       p.sell_price,
-      p.stock,
-      p.product_type,
       p.main_image,
-      p.created_at
+      COALESCE(ROUND(AVG(r.rating),1), 0) AS rating
     FROM products p
     JOIN product_categories pc ON pc.product_id = p.id
     JOIN categories c ON c.id = pc.category_id
+    LEFT JOIN product_authors pa ON pa.product_id = p.id
+    LEFT JOIN reviews r 
+      ON r.product_id = p.id AND r.status = 'approved'
     WHERE c.slug = ?
       AND p.status = 'published'
       AND p.sell_price BETWEEN ? AND ?
+      AND p.title LIKE ?
+      AND (? = '' OR pa.author_id = ?)
+    GROUP BY p.id
+    HAVING rating >= ?
     ORDER BY ${orderBy}
     LIMIT ? OFFSET ?
   `;
 
+  const countSql = `
+    SELECT COUNT(*) AS total FROM (
+      SELECT p.id
+      FROM products p
+      JOIN product_categories pc ON pc.product_id = p.id
+      JOIN categories c ON c.id = pc.category_id
+      LEFT JOIN product_authors pa ON pa.product_id = p.id
+      LEFT JOIN reviews r 
+        ON r.product_id = p.id AND r.status = 'approved'
+      WHERE c.slug = ?
+        AND p.status = 'published'
+        AND p.sell_price BETWEEN ? AND ?
+        AND p.title LIKE ?
+        AND (? = '' OR pa.author_id = ?)
+      GROUP BY p.id
+      HAVING COALESCE(ROUND(AVG(r.rating),1),0) >= ?
+    ) t
+  `;
+
   db.query(
-    sql,
-    [slug, min, max, Number(limit), Number(offset)],
-    (err, rows) => {
-      if (err) {
-        console.error("Category products error:", err);
-        return res.status(500).json({ message: "Database error" });
-      }
+    productSql,
+    [slug, min, max, `%${search}%`, author, author, rating, Number(limit), Number(offset)],
+    (err, products) => {
+      if (err) return res.status(500).json(err);
 
-      db.query("SELECT FOUND_ROWS() AS total", (err2, count) => {
-        if (err2) {
-          return res.status(500).json({ message: "Count error" });
+      db.query(
+        countSql,
+        [slug, min, max, `%${search}%`, author, author, rating],
+        (err2, count) => {
+          if (err2) return res.status(500).json(err2);
+
+          res.json({
+            products,
+            total: count[0].total,
+          });
         }
-
-        res.json({
-          products: rows,
-          total: count[0].total,
-          page: Number(page),
-          totalPages: Math.ceil(count[0].total / limit),
-        });
-      });
+      );
     }
   );
 });
 
+
 /* ======================================================
    BEST SELLERS (OPTIONAL SIDEBAR)
 ====================================================== */
-router.get("/best-sellers/list", (req, res) => {
+router.get("/:slug/best-sellers", (req, res) => {
+  const { slug } = req.params;
+
   const sql = `
     SELECT 
       p.id,
       p.title,
+      p.slug,
       p.main_image,
       SUM(oi.quantity) AS total_sold
     FROM order_items oi
     JOIN products p ON p.id = oi.product_id
-    GROUP BY oi.product_id
+    JOIN product_categories pc ON pc.product_id = p.id
+    JOIN categories c ON c.id = pc.category_id
+    WHERE c.slug = ?
+      AND p.status = 'published'
+    GROUP BY p.id
     ORDER BY total_sold DESC
     LIMIT 5
   `;
 
+  db.query(sql, [slug], (err, rows) => {
+    if (err) return res.status(500).json(err);
+    res.json(rows);
+  });
+});
+
+/* ===========================
+   CATEGORY LIST WITH PRODUCT COUNT
+=========================== */
+/* ===========================
+   CATEGORY LIST WITH PRODUCT COUNT (WITH PARENT)
+=========================== */
+router.get("/counts", (req, res) => {
+  const sql = `
+    SELECT 
+      c.id,
+      c.parent_id,
+      c.name,
+      c.slug,
+      COUNT(p.id) AS product_count
+    FROM categories c
+    LEFT JOIN product_categories pc 
+      ON pc.category_id = c.id
+    LEFT JOIN products p 
+      ON p.id = pc.product_id
+      AND p.status = 'published'
+    WHERE c.status = 'active'
+    GROUP BY c.id, c.parent_id
+    ORDER BY c.parent_id IS NULL DESC, c.name ASC
+  `;
+
   db.query(sql, (err, rows) => {
     if (err) {
-      console.error("Best sellers error:", err);
+      console.error("Category count error:", err);
       return res.status(500).json({ message: "Database error" });
     }
     res.json(rows);
   });
 });
 
-/* ======================================================
-   ADD CATEGORY (ADMIN)
-====================================================== */
-router.post("/", (req, res) => {
-  const { name, slug, status, parent_id } = req.body;
+
+
+
+
+/* ===========================
+   RATING COUNTS (CATEGORY)
+=========================== */
+router.get("/:slug/rating-counts", (req, res) => {
+  const { slug } = req.params;
 
   const sql = `
-    INSERT INTO categories (name, slug, status, parent_id)
-    VALUES (?, ?, ?, ?)
+    SELECT 
+      CASE
+        WHEN AVG(r.rating) >= 5 THEN 5
+        WHEN AVG(r.rating) >= 4 THEN 4
+        WHEN AVG(r.rating) >= 3 THEN 3
+        WHEN AVG(r.rating) >= 2 THEN 2
+        WHEN AVG(r.rating) >= 1 THEN 1
+        ELSE 0
+      END AS rating,
+      COUNT(*) AS product_count
+    FROM products p
+    JOIN product_categories pc ON pc.product_id = p.id
+    JOIN categories c ON c.id = pc.category_id
+    LEFT JOIN reviews r 
+      ON r.product_id = p.id 
+      AND r.status = 'approved'
+    WHERE c.slug = ?
+      AND p.status = 'published'
+    GROUP BY p.id
   `;
 
-  db.query(
-    sql,
-    [name, slug, status, parent_id || null],
-    (err, result) => {
-      if (err) {
-        if (err.code === "ER_DUP_ENTRY") {
-          return res.status(409).json({ message: "Slug already exists" });
-        }
-        return res.status(500).json(err);
-      }
-
-      res.json({
-        message: "Category added successfully",
-        id: result.insertId,
-      });
+  db.query(sql, [slug], (err, rows) => {
+    if (err) {
+      console.error("Rating count error:", err);
+      return res.status(500).json({ message: "Database error" });
     }
-  );
-});
 
-/* ======================================================
-   UPDATE CATEGORY (ADMIN)
-====================================================== */
-router.put("/:id", (req, res) => {
-  const { id } = req.params;
-  const { name, slug, status, parent_id } = req.body;
+    const counts = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
 
-  const sql = `
-    UPDATE categories
-    SET name = ?, slug = ?, status = ?, parent_id = ?
-    WHERE id = ?
-  `;
+    rows.forEach(r => {
+      if (r.rating >= 1) counts[r.rating] += r.product_count;
+    });
 
-  db.query(
-    sql,
-    [name, slug, status, parent_id || null, id],
-    (err) => {
-      if (err) return res.status(500).json(err);
-      res.json({ message: "Category updated successfully" });
-    }
-  );
-});
-
-/* ======================================================
-   DELETE CATEGORY (ADMIN)
-====================================================== */
-router.delete("/:id", (req, res) => {
-  const { id } = req.params;
-
-  db.query("DELETE FROM categories WHERE id = ?", [id], (err) => {
-    if (err) return res.status(500).json(err);
-    res.json({ message: "Category deleted successfully" });
+    res.json(counts);
   });
 });
+
+
+router.get("/:slug/top-authors", (req, res) => {
+  const { slug } = req.params;
+
+  const sql = `
+    SELECT 
+      a.id,
+      a.name,
+      a.profile_image,
+      COUNT(DISTINCT p.id) AS product_count
+    FROM authors a
+    JOIN product_authors pa ON pa.author_id = a.id
+    JOIN products p ON p.id = pa.product_id
+    JOIN product_categories pc ON pc.product_id = p.id
+    JOIN categories c ON c.id = pc.category_id
+    WHERE c.slug = ?
+      AND p.status = 'published'
+    GROUP BY a.id
+    ORDER BY product_count DESC
+    LIMIT 5
+  `;
+
+  db.query(sql, [slug], (err, rows) => {
+    if (err) {
+      console.error("Top authors error:", err);
+      return res.status(500).json({ message: "Database error" });
+    }
+    res.json(rows);
+  });
+});
+
+
+/* ===========================
+   AUTHOR SEARCH (CATEGORY)
+=========================== */
+router.get("/:slug/authors", (req, res) => {
+  const { slug } = req.params;
+  const { search = "" } = req.query;
+
+  const sql = `
+    SELECT 
+      a.id,
+      a.name,
+      a.profile_image,
+      COUNT(DISTINCT p.id) AS product_count
+    FROM authors a
+    JOIN product_authors pa ON pa.author_id = a.id
+    JOIN products p ON p.id = pa.product_id
+    JOIN product_categories pc ON pc.product_id = p.id
+    JOIN categories c ON c.id = pc.category_id
+    WHERE c.slug = ?
+      AND p.status = 'published'
+      AND a.name LIKE ?
+    GROUP BY a.id
+    ORDER BY product_count DESC
+  `;
+
+  db.query(sql, [slug, `%${search}%`], (err, rows) => {
+    if (err) {
+      console.error("Author search error:", err);
+      return res.status(500).json({ message: "Database error" });
+    }
+
+    res.json(rows);
+  });
+});
+
+
+
 
 module.exports = router;
