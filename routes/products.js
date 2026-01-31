@@ -364,52 +364,66 @@ router.get("/slug/:slug", (req, res) => {
       e.price AS ebook_price,
       e.sell_price AS ebook_sell_price,
 
-      GROUP_CONCAT(
-        DISTINCT JSON_OBJECT(
-          'id', a.id,
-          'name', a.name,
-          'image', a.profile_image,
-          'bio', a.bio
-        )
-      ) AS authors_json,
+      GROUP_CONCAT(DISTINCT a.id) AS author_ids,
+      GROUP_CONCAT(DISTINCT a.name) AS author_names,
+      GROUP_CONCAT(DISTINCT a.profile_image) AS author_images,
+      GROUP_CONCAT(DISTINCT a.bio) AS author_bios,
 
-      GROUP_CONCAT(
-        DISTINCT JSON_OBJECT(
-          'id', c.id,
-          'name', c.name,
-          'slug', c.slug
-        )
-      ) AS categories_json
+      GROUP_CONCAT(DISTINCT c.id) AS category_ids,
+      GROUP_CONCAT(DISTINCT c.name) AS category_names,
+      GROUP_CONCAT(DISTINCT c.slug) AS category_slugs
 
     FROM products p
-
     LEFT JOIN shipping_details sd ON sd.product_id = p.id
     LEFT JOIN ebooks e ON e.product_id = p.id
     LEFT JOIN product_authors pa ON pa.product_id = p.id
     LEFT JOIN authors a ON a.id = pa.author_id
     LEFT JOIN product_categories pc ON pc.product_id = p.id
     LEFT JOIN categories c ON c.id = pc.category_id
-
     WHERE p.slug = ?
     GROUP BY p.id
   `;
 
   db.query(sql, [slug], (err, rows) => {
-    if (err) return res.status(500).json({ message: "DB error" });
-    if (!rows.length) return res.status(404).json({ message: "Product not found" });
+    if (err) {
+      console.error("Product slug error:", err);
+      return res.status(500).json({ message: "DB error" });
+    }
+
+    if (!rows.length) {
+      return res.status(404).json({ message: "Product not found" });
+    }
 
     const product = rows[0];
 
-    product.authors = product.authors_json
-      ? JSON.parse(`[${product.authors_json}]`)
+    /* ================= BUILD AUTHORS ================= */
+    product.authors = product.author_ids
+      ? product.author_ids.split(",").map((id, i) => ({
+          id: Number(id),
+          name: product.author_names?.split(",")[i] || "",
+          image: product.author_images?.split(",")[i] || null,
+          bio: product.author_bios?.split(",")[i] || null,
+        }))
       : [];
 
-    product.categories = product.categories_json
-      ? JSON.parse(`[${product.categories_json}]`)
+    /* ================= BUILD CATEGORIES ================= */
+    product.categories = product.category_ids
+      ? product.category_ids.split(",").map((id, i) => ({
+          id: Number(id),
+          name: product.category_names?.split(",")[i] || "",
+          slug: product.category_slugs?.split(",")[i] || "",
+        }))
       : [];
 
-    delete product.authors_json;
-    delete product.categories_json;
+    /* ================= CLEAN TEMP FIELDS ================= */
+    delete product.author_ids;
+    delete product.author_names;
+    delete product.author_images;
+    delete product.author_bios;
+
+    delete product.category_ids;
+    delete product.category_names;
+    delete product.category_slugs;
 
     /* ================= ATTRIBUTES ================= */
     db.query(
@@ -429,13 +443,12 @@ router.get("/slug/:slug", (req, res) => {
           return res.status(500).json({ message: "Attribute fetch failed" });
         }
 
-        product.attributes = attributes;
+        product.attributes = attributes || [];
 
         /* ================= GALLERY ================= */
         db.query(
           `
-          SELECT 
-            image_path
+          SELECT image_path
           FROM product_gallery
           WHERE product_id = ?
           ORDER BY sort_order ASC
@@ -447,7 +460,7 @@ router.get("/slug/:slug", (req, res) => {
               return res.status(500).json({ message: "Gallery fetch failed" });
             }
 
-            product.gallery = gallery;
+            product.gallery = gallery || [];
 
             res.json(product);
           }
@@ -456,6 +469,7 @@ router.get("/slug/:slug", (req, res) => {
     );
   });
 });
+
 
 
 
