@@ -1,6 +1,7 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const db = require("../db");
+const bcrypt = require("bcryptjs");
 
 const router = express.Router();  
 const SECRET = "MY_SECRET_KEY";
@@ -54,6 +55,42 @@ router.post("/update-profile", auth, (req, res) => {
     () => res.json({ msg: "Profile updated" })
   );
 });
+
+
+
+
+/* ================= PASSWORD UPDATE ================= */
+router.put("/password", auth, async (req, res) => {
+  const { password } = req.body;
+
+  if (!password || password.length < 6) {
+    return res.status(400).json({
+      msg: "Password must be at least 6 characters",
+    });
+  }
+
+  try {
+    // 🔐 HASH PASSWORD
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    db.query(
+      "UPDATE users SET password = ? WHERE id = ?",
+      [hashedPassword, req.user.id],
+      (err) => {
+        if (err) {
+          console.error("Password update error:", err);
+          return res.status(500).json({ msg: "Database error" });
+        }
+
+        res.json({ msg: "Password updated successfully" });
+      }
+    );
+  } catch (err) {
+    console.error("Hash error:", err);
+    res.status(500).json({ msg: "Failed to update password" });
+  }
+});
+
 
 
 router.put("/address", auth, (req, res) => {

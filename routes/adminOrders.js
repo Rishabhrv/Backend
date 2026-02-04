@@ -150,4 +150,34 @@ router.get("/orders/:id", adminAuth, (req, res) => {
 });
 
 
+router.post("/orders/:id/shipping", adminAuth, (req, res) => {
+  const orderId = req.params.id;
+  const { courier, tracking_number, status } = req.body;
+
+  const columnMap = {
+    confirmed: "confirmed_at",
+    shipped: "shipped_at",
+    out_for_delivery: "out_for_delivery_at",
+    delivered: "delivered_at",
+  };
+
+  const timeColumn = columnMap[status];
+  if (!timeColumn) {
+    return res.status(400).json({ msg: "Invalid status" });
+  }
+
+  db.query(
+    `INSERT INTO shipping (order_id, courier, tracking_number, status)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       courier = VALUES(courier),
+       tracking_number = VALUES(tracking_number),
+       status = VALUES(status),
+       ${timeColumn} = NOW()`,
+    [orderId, courier, tracking_number, status],
+    () => res.json({ success: true })
+  );
+});
+
+
 module.exports = router;

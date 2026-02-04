@@ -109,8 +109,8 @@ items.forEach((i) => {
 });
 
 
-const shipping = hasPaperback ? 129 : 0;
-const total = subtotal + shipping;
+  const shipping = req.body.shipping || 0;
+  const total = subtotal + shipping;
 
 
     const orderSql = `
@@ -150,6 +150,127 @@ const total = subtotal + shipping;
     });
   });
 });
+
+
+/* ================================
+   🚚 CALCULATE SHIPPING COST
+================================ */
+router.post("/shipping-cost", auth, (req, res) => {
+  const userId = req.user.id;
+  const { state } = req.body;
+
+  if (!state) {
+    return res.status(400).json({ msg: "State required" });
+  }
+
+  // 1️⃣ Get cart with weights
+  const cartSql = `
+    SELECT 
+      c.quantity,
+      sd.weight
+    FROM cart c
+    JOIN shipping_details sd ON sd.product_id = c.product_id
+    WHERE c.user_id = ?
+    AND c.format = 'paperback'
+  `;
+
+  db.query(cartSql, [userId], (err, items) => {
+    if (err) return res.status(500).json(err);
+    if (!items.length) return res.json({ shipping: 0 });
+
+    // 2️⃣ Total weight
+    let totalWeight = 0;
+    items.forEach(i => {
+      totalWeight += Number(i.weight) * Number(i.quantity);
+    });
+
+    // 3️⃣ Find shipping zone by state
+    const zoneSql = `
+      SELECT z.id
+      FROM shipping_zones z
+      JOIN shipping_zone_regions r ON r.zone_id = z.id
+      WHERE r.region_name = ?
+      AND z.status = 'active'
+      LIMIT 1
+    `;
+
+    db.query(zoneSql, [state], (err, zones) => {
+      if (err || !zones.length) {
+        return res.json({ shipping: 0 });
+      }
+
+      const zoneId = zones[0].id;
+
+      // 4️⃣ Get weight shipping method
+      const methodSql = `
+        SELECT id FROM shipping_methods
+        WHERE zone_id = ?
+        AND method_type = 'weight'
+        AND enabled = 1
+        LIMIT 1
+      `;
+
+      db.query(methodSql, [zoneId], (err, methods) => {
+        if (err || !methods.length) {
+          return res.json({ shipping: 0 });
+        }
+
+        const methodId = methods[0].id;
+
+        // 5️⃣ Match weight rule
+        const ruleSql = `
+          SELECT *
+          FROM weight_shipping_rules
+          WHERE shipping_method_id = ?
+          AND weight_from <= ?
+          AND (weight_to IS NULL OR weight_to >= ?)
+          ORDER BY weight_from DESC
+          LIMIT 1
+        `;
+
+        db.query(ruleSql, [methodId, totalWeight, totalWeight], (err, rules) => {
+          if (err || !rules.length) {
+            return res.json({ shipping: 0 });
+          }
+
+          const r = rules[0];
+          let cost = 0;
+
+          switch (r.charge_type) {
+            case "free":
+              cost = 0;
+              break;
+
+            case "flat":
+              cost = Number(r.flat_cost);
+              break;
+
+            case "progressive":
+              cost = totalWeight * Number(r.per_kg_cost);
+              break;
+
+            case "flat_progressive":
+              if (totalWeight <= r.base_weight) {
+                cost = Number(r.base_cost);
+              } else {
+                cost =
+                  Number(r.base_cost) +
+                  (totalWeight - r.base_weight) *
+                    Number(r.extra_cost_per_kg);
+              }
+              break;
+          }
+
+          res.json({
+            shipping: Math.round(cost),
+            totalWeight,
+          });
+        });
+      });
+    });
+  });
+});
+
 
 /* ================= CLEAR CART ================= */
 router.delete("/clear", auth, (req, res) => {
