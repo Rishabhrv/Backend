@@ -75,11 +75,11 @@ router.post("/login", (req, res) => {
       const user = result[0];
 
       // 🔥 VERY IMPORTANT
-      if (user.provider !== "local") {
-        return res.status(400).json({
-          msg: "This email is registered with Google login.",
-        });
-      }
+      // if (user.provider !== "local") {
+      //   return res.status(400).json({
+      //     msg: "This email is registered with Google login.",
+      //   });
+      // }
 
       const valid = await bcrypt.compare(password, user.password);
       if (!valid) {
