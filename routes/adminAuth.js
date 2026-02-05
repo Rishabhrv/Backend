@@ -4,7 +4,7 @@ const jwt = require("jsonwebtoken");
 const db = require("../db"); // your mysql connection
 
 const router = express.Router();
-const SECRET = "MY_SECRET_KEY"; 
+const SECRET = "MY_SECRET_KEY";    
 
 /**
  * ADMIN LOGIN
