@@ -29,4 +29,4 @@ db.on("error", (err) => {
   console.error("🔥 MySQL Pool Error:", err);
 });
 
-module.exports = db;
+module.exports = db.promise();
