@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require("../db");
 const jwt = require("jsonwebtoken");
 
-const SECRET = "MY_SECRET_KEY";
+const SECRET = "MY_SECRET_KEY"; 
 
 /* ================= AUTH ================= */
 const auth = (req, res, next) => {
