@@ -32,6 +32,7 @@ app.use("/api/subscriptions", require("./routes/subscriptions"));
 app.use("/api/admin", require("./routes/users"));
 app.use("/api/admin", require("./routes/adminOrders"));
 app.use("/api/admin", require("./routes/adminSubscriptions"));
+app.use("/api/admin", require("./routes/adminPayments"));
 
 
 app.use("/api/mylibrary", require("./routes/mylibrary"));
@@ -40,6 +41,29 @@ app.use("/api/payment-history", require("./routes/payment-history"));
 
 // ADMIN SECTION
 app.use("/api/shipping", require("./routes/shipping"));
+
+// GLOBAL ERROR HANDLER (LAST MIDDLEWARE)
+app.use((err, req, res, next) => {
+  console.error("🔥 GLOBAL ERROR:", err);
+
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  res.status(500).json({
+    message: "Something went wrong. Please try again later.",
+  });
+});
+
+
+process.on("uncaughtException", (err) => {
+  console.error("💥 UNCAUGHT EXCEPTION:", err);
+  // DO NOT exit in production
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("💥 UNHANDLED PROMISE REJECTION:", reason);
+});
 
 
 app.listen(PORT, () => {
