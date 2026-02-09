@@ -35,8 +35,15 @@ router.get("/:slug/products", (req, res) => {
       p.id,
       p.title,
       p.slug,
-      p.price,
-      p.sell_price,
+
+      -- paperback prices
+      p.price AS price,
+      p.sell_price AS sell_price,
+
+      -- ebook prices (nullable)
+      e.price AS ebook_price,
+      e.sell_price AS ebook_sell_price,
+
       p.stock,
       p.product_type,
       p.status,
@@ -44,6 +51,7 @@ router.get("/:slug/products", (req, res) => {
     FROM products p
     JOIN product_categories pc ON pc.product_id = p.id
     JOIN categories c ON c.id = pc.category_id
+    LEFT JOIN ebooks e ON e.product_id = p.id
     WHERE c.slug = ?
       AND p.status = 'published'
     ORDER BY p.created_at DESC
@@ -58,6 +66,8 @@ router.get("/:slug/products", (req, res) => {
     res.json(rows);
   });
 });
+
+
 
 
 /* ADD CATEGORY */
@@ -113,13 +123,73 @@ router.put("/:id", (req, res) => {
 router.delete("/:id", (req, res) => {
   const { id } = req.params;
 
-  const sql = "DELETE FROM categories WHERE id = ?";
+  db.query(
+    "DELETE FROM categories WHERE id = ?",
+    [id],
+    (err) => {
+      if (err) {
+        console.error(err);
+        return res.status(409).json({
+          message: "Cannot delete category. It may be in use."
+        });
+      }
 
-  db.query(sql, [id], (err) => {
-    if (err) return res.status(500).json(err);
-    res.json({ message: "Category deleted successfully" });
-  });
+      res.json({ success: true });
+    }
+  );
 });
+
+
+
+router.post("/bulk-delete", (req, res) => {
+  const { ids } = req.body;
+
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ message: "No IDs provided" });
+  }
+
+  db.query(
+    "DELETE FROM categories WHERE id IN (?)",
+    [ids],
+    (err) => {
+      if (err) {
+        console.error(err);
+        return res.status(409).json({
+          message: "Some categories cannot be deleted"
+        });
+      }
+
+      res.json({ success: true });
+    }
+  );
+});
+
+/* BULK STATUS UPDATE */
+router.post("/bulk-status", (req, res) => {
+  const { ids, status } = req.body;
+
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ message: "No IDs provided" });
+  }
+
+  if (!["active", "inactive"].includes(status)) {
+    return res.status(400).json({ message: "Invalid status" });
+  }
+
+  db.query(
+    `UPDATE categories SET status = ? WHERE id IN (?)`,
+    [status, ids],
+    (err) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ message: "Bulk update failed" });
+      }
+
+      res.json({ success: true });
+    }
+  );
+});
+
 
 
 

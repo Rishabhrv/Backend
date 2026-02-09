@@ -10,6 +10,40 @@ const SECRET = "MY_SECRET_KEY";
  * ADMIN LOGIN
  * POST /api/admin/login
  */
+
+
+/**
+ * 🔍 VERIFY ADMIN TOKEN
+ * GET /api/admin/me
+ */
+router.get("/me", (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ msg: "No token" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  try {
+    const decoded = jwt.verify(token, SECRET);
+
+    if (decoded.role !== "admin") {
+      return res.status(403).json({ msg: "Admin only" });
+    }
+
+    res.json({
+      id: decoded.id,
+      name: decoded.name,
+      email: decoded.email,
+    });
+  } catch {
+    return res.status(401).json({ msg: "Invalid or expired token" });
+  }
+});
+
+
+
+
 router.post("/login", (req, res) => {
   const { email, password } = req.body;
 
