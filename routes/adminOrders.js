@@ -33,9 +33,15 @@ router.get("/orders", adminAuth, (req, res) => {
        o.status,
        o.payment_status,
        o.created_at,
-       u.name AS user_name
+       u.name AS user_name,
+
+       s.courier,
+       s.tracking_number,
+       s.status AS shipping_status
+
      FROM orders o
      LEFT JOIN users u ON u.id = o.user_id
+     LEFT JOIN shipping s ON s.order_id = o.id
      ORDER BY o.created_at DESC`,
     (err, rows) => {
       if (err) return res.status(500).json({ msg: "DB error" });
@@ -43,6 +49,7 @@ router.get("/orders", adminAuth, (req, res) => {
     }
   );
 });
+
 
 /* ============================
    📄 GET SINGLE ORDER (FULL)

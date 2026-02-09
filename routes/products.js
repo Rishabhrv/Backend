@@ -490,38 +490,30 @@ router.get("/:id", (req, res) => {
       p.status,
       p.product_type,
       p.main_image,
-
-      sd.weight,
-      sd.length,
-      sd.width,
-      sd.height,
-
-      sm.meta_title,
-      sm.meta_description,
-      sm.keywords,
-
-      e.file_path AS ebook_path,
-      e.file_type AS ebook_type,
-      e.price AS ebook_price,
-      e.sell_price AS ebook_sell_price,
-
-      GROUP_CONCAT(pc.category_id) AS category_ids
-
+    
+      MAX(sd.weight) AS weight,
+      MAX(sd.length) AS length,
+      MAX(sd.width) AS width,
+      MAX(sd.height) AS height,
+    
+      MAX(sm.meta_title) AS meta_title,
+      MAX(sm.meta_description) AS meta_description,
+      MAX(sm.keywords) AS keywords,
+    
+      MAX(e.file_path) AS ebook_path,
+      MAX(e.file_type) AS ebook_type,
+      MAX(e.price) AS ebook_price,
+      MAX(e.sell_price) AS ebook_sell_price,
+    
+      GROUP_CONCAT(DISTINCT pc.category_id) AS category_ids
+    
     FROM products p
-
-    LEFT JOIN shipping_details sd 
-      ON sd.product_id = p.id
-
+    LEFT JOIN shipping_details sd ON sd.product_id = p.id
     LEFT JOIN seo_meta sm 
       ON sm.page_type = 'product' 
       AND sm.page_id = p.id
-
-    LEFT JOIN ebooks e 
-      ON e.product_id = p.id
-
-    LEFT JOIN product_categories pc 
-      ON pc.product_id = p.id
-
+    LEFT JOIN ebooks e ON e.product_id = p.id
+    LEFT JOIN product_categories pc ON pc.product_id = p.id
     WHERE p.id = ?
     GROUP BY p.id
   `;
@@ -786,21 +778,45 @@ if (req.files?.gallery) {
 
 // =============Delete=============
 
-router.delete("/:id", (req, res) => {
+// MOVE PRODUCT TO TRASH (SOFT DELETE)
+router.put("/:id/trash", (req, res) => {
   const { id } = req.params;
 
   db.query(
-    "DELETE FROM products WHERE id = ?",
+    "UPDATE products SET status = 'trash' WHERE id = ?",
     [id],
     (err) => {
       if (err) {
         console.error(err);
-        return res.status(500).json({ message: "Delete failed" });
+        return res.status(500).json({ message: "Failed to move to trash" });
       }
-      res.json({ message: "Product deleted" });
+      res.json({ message: "Product moved to trash" });
     }
   );
 });
+
+
+
+router.post("/bulk-status", (req, res) => {
+  const { ids, status } = req.body;
+
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ message: "No product IDs provided" });
+  }
+
+  db.query(
+    `UPDATE products SET status = ? WHERE id IN (?)`,
+    [status, ids],
+    (err) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ message: "Bulk status update failed" });
+      }
+      res.json({ success: true });
+    }
+  );
+});
+
 
 
 

@@ -56,11 +56,13 @@ router.post("/:productId", auth, (req, res) => {
 router.get("/my", auth, (req, res) => {
   db.query(
     `SELECT 
-        p.id, 
-        p.title, 
-        p.slug, 
-        p.sell_price, 
-        p.main_image
+        p.id,
+        p.title,
+        p.slug,
+        p.sell_price,
+        p.main_image,
+        p.product_type,
+        p.stock
      FROM wishlist w
      JOIN products p ON p.id = w.product_id
      WHERE w.user_id = ?`,
@@ -71,6 +73,7 @@ router.get("/my", auth, (req, res) => {
     }
   );
 });
+
 
 /* ================= REMOVE ITEM ================= */
 /* DELETE /api/wishlist/remove/:productId */

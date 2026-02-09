@@ -140,5 +140,71 @@ router.put("/:id", upload.single("profile_image"), (req, res) => {
 });
 
 
+/* DELETE AUTHOR */
+router.delete("/:id", (req, res) => {
+  const { id } = req.params;
+
+  db.query(
+    "DELETE FROM authors WHERE id = ?",
+    [id],
+    (err) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ message: "Delete failed" });
+      }
+      res.json({ success: true });
+    }
+  );
+});
+
+
+/* BULK DELETE AUTHORS */
+router.post("/bulk-delete", (req, res) => {
+  const { ids } = req.body;
+
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ message: "No IDs provided" });
+  }
+
+  db.query(
+    "DELETE FROM authors WHERE id IN (?)",
+    [ids],
+    (err) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ message: "Bulk delete failed" });
+      }
+      res.json({ success: true });
+    }
+  );
+});
+
+
+/* BULK STATUS UPDATE */
+router.post("/bulk-status", (req, res) => {
+  const { ids, status } = req.body;
+
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ message: "No IDs provided" });
+  }
+
+  if (!["active", "inactive"].includes(status)) {
+    return res.status(400).json({ message: "Invalid status" });
+  }
+
+  db.query(
+    "UPDATE authors SET status = ? WHERE id IN (?)",
+    [status, ids],
+    (err) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ message: "Bulk update failed" });
+      }
+      res.json({ success: true });
+    }
+  );
+});
+
+
 
 module.exports = router;
