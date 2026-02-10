@@ -33,6 +33,8 @@ app.use("/api/admin", require("./routes/users"));
 app.use("/api/admin", require("./routes/adminOrders"));
 app.use("/api/admin", require("./routes/adminSubscriptions"));
 app.use("/api/admin", require("./routes/adminPayments"));
+app.use("/api/admin", require("./routes/adminCoupons"));
+
 
 
 app.use("/api/mylibrary", require("./routes/mylibrary"));
