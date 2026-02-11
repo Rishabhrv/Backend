@@ -93,8 +93,8 @@ router.post("/create", auth, (req, res) => {
   `;
 
   db.query(cartSql, [user_id], (err, items) => {
-    if (err || items.length === 0)
-      return res.status(400).json({ msg: "Cart empty" });
+      if (!items || items.length === 0)
+        return res.status(400).json({ msg: "Cart empty" });
 
 let subtotal = 0;
 let hasPaperback = false;
@@ -306,6 +306,11 @@ router.post("/apply-coupon", auth, (req, res) => {
          WHERE coupon_id = ? AND user_id = ?`,
         [coupon.id, userId],
         (err, rows) => {
+          if (err) return res.status(500).json(err);
+
+          if (!rows || !rows.length) {
+            return res.status(400).json({ msg: "Coupon usage check failed" });
+          }
           if (rows[0].used >= coupon.usage_per_user) {
             return res.status(400).json({
               reason: "usage",
@@ -336,12 +341,15 @@ router.post("/apply-coupon", auth, (req, res) => {
             `,
             [userId],
             (err, items) => {
-              if (!items.length) {
-                return res.status(400).json({
-                  reason: "empty",
-                  msg: "Your cart is empty",
-                });
-              }
+                if (err) return res.status(500).json(err);
+
+                if (!items || !items.length) {
+                  return res.status(400).json({
+                    reason: "empty",
+                    msg: "Your cart is empty",
+                  });
+                }
+
 
               /* 4️⃣ LOAD COUPON MAPPINGS */
               const loadMappings = () =>
