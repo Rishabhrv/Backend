@@ -444,9 +444,10 @@ router.post("/apply-coupon", auth, (req, res) => {
                   discount = Math.min(discount, coupon.max_discount);
                 }
 
+
                 /* ✅ SUCCESS */
                 res.json({
-                  discount: Math.round(discount),
+                  discount: Number(discount.toFixed(2)),
                   eligible_items: eligibleItems,
                   applicable_on: coupon.applicable_on,
                 });
