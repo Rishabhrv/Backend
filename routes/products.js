@@ -9,6 +9,17 @@ const Epub = require("epub-gen");
 const pandoc = require("node-pandoc");
 const { spawn } = require("child_process");
 
+const { exec } = require("child_process");
+
+exec("/usr/bin/pandoc --version", (err, stdout, stderr) => {
+  if (err) {
+    console.error("ERROR:", err);
+  } else {
+    console.log("Pandoc is working:");
+    console.log(stdout);
+  }
+});
+
 /* STORAGE */
 const fs = require("fs");
 
