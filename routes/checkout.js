@@ -78,6 +78,7 @@ router.post("/save-address", auth, (req, res) => {
 /* ================= CREATE ORDER ================= */
 router.post("/create", auth, (req, res) => {
   const user_id = req.user.id;
+  const { shipping = 0, couponCode } = req.body;
 
   const cartSql = `
     SELECT 
@@ -85,7 +86,8 @@ router.post("/create", auth, (req, res) => {
       c.format,
       c.quantity,
       p.sell_price AS paperback_price,
-      e.sell_price AS ebook_price
+      e.sell_price AS ebook_price,
+      p.product_type
     FROM cart c
     JOIN products p ON p.id = c.product_id
     LEFT JOIN ebooks e ON e.product_id = p.id
@@ -93,63 +95,112 @@ router.post("/create", auth, (req, res) => {
   `;
 
   db.query(cartSql, [user_id], (err, items) => {
-      if (!items || items.length === 0)
-        return res.status(400).json({ msg: "Cart empty" });
+    if (err) return res.status(500).json(err);
+    if (!items || items.length === 0)
+      return res.status(400).json({ msg: "Cart empty" });
 
-let subtotal = 0;
-let hasPaperback = false;
+    let subtotal = 0;
 
-items.forEach((i) => {
-  if (i.format === "ebook") {
-    subtotal += Number(i.ebook_price) * Number(i.quantity || 1);
-  } else {
-    subtotal += Number(i.paperback_price) * Number(i.quantity);
-    hasPaperback = true;
-  }
-});
- 
+    items.forEach((i) => {
+      if (i.format === "ebook") {
+        subtotal += Number(i.ebook_price) * Number(i.quantity || 1);
+      } else {
+        subtotal += Number(i.paperback_price) * Number(i.quantity);
+      }
+    });
 
-  const shipping = req.body.shipping || 0;
-  const total = subtotal + shipping;
+    const processOrder = (discount = 0, coupon_id = null) => {
+      const total = subtotal + Number(shipping) - discount;
 
+      const orderSql = `
+        INSERT INTO orders 
+        (user_id, total_amount, coupon_code, coupon_discount, status, payment_status)
+        VALUES (?, ?, ?, ?, 'pending', 'pending')
+      `;
 
-    const orderSql = `
-      INSERT INTO orders (user_id, total_amount, status, payment_status)
-      VALUES (?, ?, 'pending', 'pending')
-    `;
-
-    db.query(orderSql, [user_id, total], (err, result) => {
-      if (err) return res.status(500).json(err);
-
-      const order_id = result.insertId;
-
-      const orderItems = items.map((i) => [
-        order_id,
-        i.product_id,
-        i.format, // ✅ NEW
-        i.format === "ebook" ? i.ebook_price : i.paperback_price,
-        i.format === "ebook" ? 1 : i.quantity
-      ]);
-      
       db.query(
-        `INSERT INTO order_items 
-         (order_id, product_id, format, price, quantity) 
-         VALUES ?`,
-        [orderItems],
-        () => {
-          res.json({
-            msg: "Order created",
+        orderSql,
+        [user_id, total, couponCode || null, discount],
+        (err, result) => {
+          if (err) return res.status(500).json(err);
+
+          const order_id = result.insertId;
+
+          const orderItems = items.map((i) => [
             order_id,
-            subtotal,
-            shipping,
-            total,
-          });
+            i.product_id,
+            i.format,
+            i.format === "ebook" ? i.ebook_price : i.paperback_price,
+            i.format === "ebook" ? 1 : i.quantity
+          ]);
+
+          db.query(
+            `INSERT INTO order_items 
+             (order_id, product_id, format, price, quantity) 
+             VALUES ?`,
+            [orderItems],
+            () => {
+
+              // Save coupon usage
+              if (coupon_id) {
+                db.query(
+                  `INSERT INTO coupon_usage (coupon_id, user_id, order_id)
+                   VALUES (?, ?, ?)`,
+                  [coupon_id, user_id, order_id]
+                );
+              }
+
+              res.json({
+                msg: "Order created",
+                order_id,
+                subtotal,
+                shipping,
+                discount,
+                total,
+              });
+            }
+          );
         }
       );
+    };
 
-    });
+    /* =======================
+       APPLY COUPON AGAIN
+    ======================= */
+
+    if (!couponCode) {
+      return processOrder(0, null);
+    }
+
+    db.query(
+      `SELECT * FROM coupons
+       WHERE code = ?
+       AND status = 'active'
+       AND start_date <= CURDATE()
+       AND expiry_date >= CURDATE()`,
+      [couponCode],
+      (err, rows) => {
+        if (err || !rows.length) {
+          return processOrder(0, null);
+        }
+
+        const coupon = rows[0];
+
+        let discount =
+          coupon.discount_type === "percent"
+            ? (subtotal * coupon.discount_value) / 100
+            : coupon.discount_value;
+
+        if (coupon.max_discount) {
+          discount = Math.min(discount, coupon.max_discount);
+        }
+
+        processOrder(Number(discount.toFixed(2)), coupon.id);
+      }
+    );
   });
 });
+
 
 
 /* ================================
@@ -273,6 +324,7 @@ router.post("/shipping-cost", auth, (req, res) => {
 
 
 /* ================= APPLY COUPON ================= */
+/* ================= APPLY COUPON ================= */
 router.post("/apply-coupon", auth, (req, res) => {
   const userId = req.user.id;
   const { code } = req.body;
@@ -290,7 +342,12 @@ router.post("/apply-coupon", auth, (req, res) => {
        AND expiry_date >= CURDATE()`,
     [code],
     (err, coupons) => {
-      if (err || !coupons.length) {
+      if (err) {
+        console.error("Coupon fetch error:", err);
+        return res.status(500).json({ msg: "Database error" });
+      }
+
+      if (!coupons.length) {
         return res.status(400).json({
           reason: "invalid",
           msg: "Invalid or expired coupon",
@@ -299,167 +356,192 @@ router.post("/apply-coupon", auth, (req, res) => {
 
       const coupon = coupons[0];
 
-      /* 2️⃣ USER USAGE CHECK */
+      /* 2️⃣ GLOBAL USAGE CHECK */
       db.query(
-        `SELECT COUNT(*) AS used
+        `SELECT COUNT(*) AS total_used
          FROM coupon_usage
-         WHERE coupon_id = ? AND user_id = ?`,
-        [coupon.id, userId],
-        (err, rows) => {
-          if (err) return res.status(500).json(err);
-
-          if (!rows || !rows.length) {
-            return res.status(400).json({ msg: "Coupon usage check failed" });
+         WHERE coupon_id = ?`,
+        [coupon.id],
+        (err, totalRows) => {
+          if (err) {
+            console.error("Global usage error:", err);
+            return res.status(500).json({ msg: "Database error" });
           }
-          if (rows[0].used >= coupon.usage_per_user) {
+
+          if (
+            coupon.usage_limit !== null &&
+            totalRows[0].total_used >= coupon.usage_limit
+          ) {
             return res.status(400).json({
-              reason: "usage",
+              reason: "limit",
               msg: "Coupon usage limit reached",
             });
           }
 
-          /* 3️⃣ LOAD CART */
+          /* 3️⃣ USER USAGE CHECK */
           db.query(
-            `
-            SELECT 
-              c.product_id,
-              c.format,
-              c.quantity,
-              p.title,
-              p.product_type,
-              CASE 
-                WHEN c.format = 'ebook' THEN e.sell_price
-                ELSE p.sell_price
-              END AS price,
-              GROUP_CONCAT(pc.category_id) AS categories
-            FROM cart c
-            JOIN products p ON p.id = c.product_id
-            LEFT JOIN ebooks e ON e.product_id = p.id
-            LEFT JOIN product_categories pc ON pc.product_id = p.id
-            WHERE c.user_id = ?
-            GROUP BY c.product_id, c.format
-            `,
-            [userId],
-            (err, items) => {
-                if (err) return res.status(500).json(err);
+            `SELECT COUNT(*) AS used
+             FROM coupon_usage
+             WHERE coupon_id = ? AND user_id = ?`,
+            [coupon.id, userId],
+            (err, rows) => {
+              if (err) {
+                console.error("Coupon usage error:", err);
+                return res.status(500).json({ msg: "Database error" });
+              }
 
-                if (!items || !items.length) {
-                  return res.status(400).json({
-                    reason: "empty",
-                    msg: "Your cart is empty",
-                  });
-                }
-
-
-              /* 4️⃣ LOAD COUPON MAPPINGS */
-              const loadMappings = () =>
-                new Promise(resolve => {
-                  if (coupon.applicable_on === "product") {
-                    return db.query(
-                      `SELECT cp.product_id, p.title
-                       FROM coupon_products cp
-                       JOIN products p ON p.id = cp.product_id
-                       WHERE cp.coupon_id = ?`,
-                      [coupon.id],
-                      (_, rows) => resolve({ products: rows, categories: [] })
-                    );
-                  }
-
-                  if (coupon.applicable_on === "category") {
-                    return db.query(
-                      `SELECT cc.category_id, c.name
-                       FROM coupon_categories cc
-                       JOIN categories c ON c.id = cc.category_id
-                       WHERE cc.coupon_id = ?`,
-                      [coupon.id],
-                      (_, rows) => resolve({ categories: rows, products: [] })
-                    );
-                  }
-
-                  resolve({ products: [], categories: [] });
+              if (
+                coupon.usage_per_user !== null &&
+                rows[0].used >= coupon.usage_per_user
+              ) {
+                return res.status(400).json({
+                  reason: "usage",
+                  msg: "You have already used this coupon",
                 });
+              }
 
-              loadMappings().then(({ products, categories }) => {
-                let eligibleSubtotal = 0;
-                const eligibleItems = [];
-
-                items.forEach(item => {
-                  const qty = item.quantity || 1;
-                  const itemTotal = Number(item.price) * qty;
-
-                  /* PRODUCT TYPE */
-                  if (
-                    coupon.product_type !== "all" &&
-                    coupon.product_type !== item.product_type &&
-                    !(coupon.product_type === "physical" && item.format === "paperback")
-                  ) return;
-
-                  /* ALL */
-                  if (coupon.applicable_on === "all") {
-                    eligibleSubtotal += itemTotal;
-                    eligibleItems.push(item.title);
-                    return;
+              /* 4️⃣ LOAD CART */
+              db.query(
+                `
+                SELECT 
+                  c.product_id,
+                  c.format,
+                  c.quantity,
+                  p.title,
+                  p.product_type,
+                  CASE 
+                    WHEN c.format = 'ebook' THEN e.sell_price
+                    ELSE p.sell_price
+                  END AS price,
+                  GROUP_CONCAT(pc.category_id) AS categories
+                FROM cart c
+                JOIN products p ON p.id = c.product_id
+                LEFT JOIN ebooks e ON e.product_id = p.id
+                LEFT JOIN product_categories pc ON pc.product_id = p.id
+                WHERE c.user_id = ?
+                GROUP BY c.product_id, c.format, price
+                `,
+                [userId],
+                (err, items) => {
+                  if (err) {
+                    console.error("Cart load error:", err);
+                    return res.status(500).json({ msg: "Database error" });
                   }
 
-                  /* PRODUCT */
-                  if (coupon.applicable_on === "product") {
-                    const allowedIds = products.map(p => p.product_id);
-                    if (allowedIds.includes(item.product_id)) {
-                      eligibleSubtotal += itemTotal;
-                      eligibleItems.push(item.title);
+                  if (!items.length) {
+                    return res.status(400).json({
+                      reason: "empty",
+                      msg: "Your cart is empty",
+                    });
+                  }
+
+                  /* 5️⃣ LOAD COUPON MAPPINGS */
+                  const loadMappings = () =>
+                    new Promise((resolve) => {
+                      if (coupon.applicable_on === "product") {
+                        return db.query(
+                          `SELECT product_id FROM coupon_products WHERE coupon_id = ?`,
+                          [coupon.id],
+                          (err, rows) =>
+                            resolve({ products: rows || [], categories: [] })
+                        );
+                      }
+
+                      if (coupon.applicable_on === "category") {
+                        return db.query(
+                          `SELECT category_id FROM coupon_categories WHERE coupon_id = ?`,
+                          [coupon.id],
+                          (err, rows) =>
+                            resolve({ categories: rows || [], products: [] })
+                        );
+                      }
+
+                      resolve({ products: [], categories: [] });
+                    });
+
+                  loadMappings().then(({ products, categories }) => {
+                    let eligibleSubtotal = 0;
+                    const eligibleItems = [];
+
+                    items.forEach((item) => {
+                      const qty = item.quantity || 1;
+                      const itemTotal = Number(item.price || 0) * qty;
+
+                      /* PRODUCT TYPE FILTER */
+                      if (
+                        coupon.product_type !== "all" &&
+                        coupon.product_type !== item.product_type &&
+                        !(coupon.product_type === "physical" &&
+                          item.format === "paperback")
+                      ) {
+                        return;
+                      }
+
+                      /* APPLY ALL */
+                      if (coupon.applicable_on === "all") {
+                        eligibleSubtotal += itemTotal;
+                        eligibleItems.push(item.title);
+                        return;
+                      }
+
+                      /* APPLY PRODUCT */
+                      if (coupon.applicable_on === "product") {
+                        const allowedIds = products.map(p => p.product_id);
+                        if (allowedIds.includes(item.product_id)) {
+                          eligibleSubtotal += itemTotal;
+                          eligibleItems.push(item.title);
+                        }
+                        return;
+                      }
+
+                      /* APPLY CATEGORY */
+                      if (coupon.applicable_on === "category") {
+                        const itemCats = (item.categories || "")
+                          .split(",")
+                          .map(Number);
+                        const allowedCats = categories.map(c => c.category_id);
+
+                        if (itemCats.some(c => allowedCats.includes(c))) {
+                          eligibleSubtotal += itemTotal;
+                          eligibleItems.push(item.title);
+                        }
+                      }
+                    });
+
+                    if (!eligibleSubtotal) {
+                      return res.status(400).json({
+                        reason: coupon.applicable_on,
+                        msg: "Coupon not applicable to selected items",
+                      });
                     }
-                    return;
-                  }
 
-                  /* CATEGORY */
-                  if (coupon.applicable_on === "category") {
-                    const itemCats = (item.categories || "").split(",").map(Number);
-                    const allowedCats = categories.map(c => c.category_id);
-
-                    if (itemCats.some(c => allowedCats.includes(c))) {
-                      eligibleSubtotal += itemTotal;
-                      eligibleItems.push(item.title);
+                    if (eligibleSubtotal < coupon.min_cart_value) {
+                      return res.status(400).json({
+                        reason: "min_cart",
+                        msg: `Add ₹${(
+                          coupon.min_cart_value - eligibleSubtotal
+                        ).toFixed(2)} more to apply this coupon`,
+                      });
                     }
-                  }
-                });
 
-                /* ❌ NO MATCH */
-                if (!eligibleSubtotal) {
-                  return res.status(400).json({
-                    reason: coupon.applicable_on,
-                    msg:
-                      coupon.applicable_on === "product"
-                        ? `This coupon applies only to: ${products.map(p => p.title).join(", ")}`
-                        : `This coupon applies only to categories: ${categories.map(c => c.name).join(", ")}`,
+                    /* 6️⃣ CALCULATE DISCOUNT */
+                    let discount =
+                      coupon.discount_type === "percent"
+                        ? (eligibleSubtotal * coupon.discount_value) / 100
+                        : coupon.discount_value;
+
+                    if (coupon.max_discount) {
+                      discount = Math.min(discount, coupon.max_discount);
+                    }
+
+                    return res.json({
+                      discount: Number(discount.toFixed(2)),
+                      eligible_items: eligibleItems,
+                      applicable_on: coupon.applicable_on,
+                    });
                   });
                 }
-
-                /* MIN CART */
-                if (eligibleSubtotal < coupon.min_cart_value) {
-                  return res.status(400).json({
-                    reason: "min_cart",
-                    msg: `Add ₹${coupon.min_cart_value - eligibleSubtotal} more to apply this coupon`,
-                  });
-                }
-
-                /* DISCOUNT */
-                let discount =
-                  coupon.discount_type === "percent"
-                    ? (eligibleSubtotal * coupon.discount_value) / 100
-                    : coupon.discount_value;
-
-                if (coupon.max_discount) {
-                  discount = Math.min(discount, coupon.max_discount);
-                }
-
-
-                /* ✅ SUCCESS */
-                res.json({
-                  discount: Number(discount.toFixed(2)),
-                  eligible_items: eligibleItems,
-                  applicable_on: coupon.applicable_on,
-                });
-              });
+              );
             }
           );
         }
@@ -467,6 +549,7 @@ router.post("/apply-coupon", auth, (req, res) => {
     }
   );
 });
+
 
 
 
