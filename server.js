@@ -29,12 +29,14 @@ app.use("/api/my-books", require("./routes/myBooks"));
 app.use("/api/subscription-payment", require("./routes/subscriptionpayment"));
 app.use("/api/subscriptions", require("./routes/subscriptions"));
 
+app.use("/api/admin", require("./routes/adminEbooks"));
+
+
 app.use("/api/admin", require("./routes/users"));
 app.use("/api/admin", require("./routes/adminOrders"));
 app.use("/api/admin", require("./routes/adminSubscriptions"));
 app.use("/api/admin", require("./routes/adminPayments"));
 app.use("/api/admin", require("./routes/adminCoupons"));
-
 
 
 app.use("/api/mylibrary", require("./routes/mylibrary"));
