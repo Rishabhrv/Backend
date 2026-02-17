@@ -9,16 +9,6 @@ const Epub = require("epub-gen");
 const pandoc = require("node-pandoc");
 const { spawn } = require("child_process");
 
-const { exec } = require("child_process");
-
-exec("/usr/bin/pandoc --version", (err, stdout, stderr) => {
-  if (err) {
-    console.error("ERROR:", err);
-  } else {
-    console.log("Pandoc is working:");
-    console.log(stdout);
-  }
-});
 
 /* STORAGE */
 const fs = require("fs");
@@ -71,6 +61,7 @@ function convertDocxToEpub(options, callback) {
   const cssPath = path.join(uploadPath, "epub-styles.css");
 
   const pandocPath = process.env.PANDOC_PATH;
+  console.log("Using pandoc path:", pandocPath);
 
   // Create media directory
   if (!fs.existsSync(mediaDir)) {
@@ -332,6 +323,7 @@ end
   }, 30000);
 
   toEpub.stderr.on("data", (data) => {
+    console.error("Pandoc STDERR:", data.toString());
     stderrOutput += data.toString();
   });
 
@@ -341,6 +333,8 @@ end
   });
 
   toEpub.on("close", (code) => {
+    console.log("Pandoc exit code:", code);
+
     clearTimeout(timeout);
 
     if (code !== 0) {
