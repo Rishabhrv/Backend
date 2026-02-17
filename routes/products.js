@@ -59,7 +59,7 @@ function convertDocxToEpub(options, callback) {
   const luaFilterPath = path.join(uploadPath, "chapter-numbering.lua");
   const cssPath = path.join(uploadPath, "epub-styles.css");
 
-  const pandocPath = "pandoc";
+  const pandocPath = process.env.PANDOC_PATH;
 
   // Create media directory
   if (!fs.existsSync(mediaDir)) {
