@@ -26,24 +26,34 @@ router.get("/", (req, res) => {
   });
 });
 
+
+
 /* ================= GET PRODUCTS BY CATEGORY SLUG ================= */
 router.get("/:slug/products", (req, res) => {
   const { slug } = req.params;
+  const { product_type, limit } = req.query;
+
+  const params = [slug];
+  let typeFilter = "";
+
+  // ── Filter by product_type if provided ──────────────────────────────────
+  if (product_type === "ebook") {
+    typeFilter = `AND (p.product_type = 'ebook' OR p.product_type = 'both')`;
+  } else if (product_type === "physical") {
+    typeFilter = `AND (p.product_type = 'physical' OR p.product_type = 'both')`;
+  }
+
+  const limitClause = limit ? `LIMIT ${parseInt(limit)}` : "";
 
   const sql = `
     SELECT 
       p.id,
       p.title,
       p.slug,
-
-      -- paperback prices
-      p.price AS price,
-      p.sell_price AS sell_price,
-
-      -- ebook prices (nullable)
-      e.price AS ebook_price,
-      e.sell_price AS ebook_sell_price,
-
+      p.price         AS price,
+      p.sell_price    AS sell_price,
+      e.price         AS ebook_price,
+      e.sell_price    AS ebook_sell_price,
       p.stock,
       p.product_type,
       p.status,
@@ -54,15 +64,16 @@ router.get("/:slug/products", (req, res) => {
     LEFT JOIN ebooks e ON e.product_id = p.id
     WHERE c.slug = ?
       AND p.status = 'published'
+      ${typeFilter}
     ORDER BY p.created_at DESC
+    ${limitClause}
   `;
 
-  db.query(sql, [slug], (err, rows) => {
+  db.query(sql, params, (err, rows) => {
     if (err) {
       console.error("Category products error:", err);
       return res.status(500).json({ message: "Database error" });
     }
-
     res.json(rows);
   });
 });

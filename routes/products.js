@@ -776,6 +776,7 @@ router.get("/slug/:slug", (req, res) => {
       GROUP_CONCAT(DISTINCT a.name) AS author_names,
       GROUP_CONCAT(DISTINCT a.profile_image) AS author_images,
       GROUP_CONCAT(DISTINCT a.bio) AS author_bios,
+      GROUP_CONCAT(DISTINCT a.slug) AS author_slugs,
 
       GROUP_CONCAT(DISTINCT c.id) AS category_ids,
       GROUP_CONCAT(DISTINCT c.name) AS category_names,
@@ -811,6 +812,7 @@ router.get("/slug/:slug", (req, res) => {
           name: product.author_names?.split(",")[i] || "",
           image: product.author_images?.split(",")[i] || null,
           bio: product.author_bios?.split(",")[i] || null,
+          slug: product.author_slugs?.split(",")[i] || "", 
         }))
       : [];
 
@@ -828,6 +830,7 @@ router.get("/slug/:slug", (req, res) => {
     delete product.author_names;
     delete product.author_images;
     delete product.author_bios;
+    delete product.author_slugs;
 
     delete product.category_ids;
     delete product.category_names;
@@ -1239,7 +1242,6 @@ if (req.body.deletedGallery) {
   }
 }
 
-/* UPDATE ORDER */
 if (req.body.existingGallery) {
   const existing = JSON.parse(req.body.existingGallery);
   existing.forEach(img => {
@@ -1370,7 +1372,8 @@ router.post("/convert-doc", upload.single("file"), (req, res) => {
   const file = req.file;
   if (!file) return res.status(400).json({ message: "No file uploaded" });
 
-  let productId = req.body.product_id || null;
+  const productId = req.body.product_id ? Number(req.body.product_id) : null;
+  const isEdit = !!productId;
 
   const {
     title,
@@ -1416,6 +1419,122 @@ router.post("/convert-doc", upload.single("file"), (req, res) => {
     }
   );
 };
+
+if (isEdit) {
+
+  return convertDocxToEpub(
+    {
+      originalPath: file.path,
+      uploadPath: path.dirname(file.path),
+      ebookFile: file,
+      title
+    },
+    function (error, result) {
+
+      if (error) {
+        return res.status(500).json({
+          message: "Conversion failed",
+          error: error.message
+        });
+      }
+
+      const epubPath = `/uploads/ebooks/${result.epubFilename}`;
+
+      // 🔥 Update product_type first
+      db.query(
+        `UPDATE products SET product_type = ? WHERE id = ?`,
+        [product_type, productId],
+        function (err) {
+
+          if (err) {
+            return res.status(500).json({ message: err.message });
+          }
+
+          // 🔥 Check if ebook exists
+          db.query(
+            `SELECT id FROM ebooks WHERE product_id = ?`,
+            [productId],
+            function (err, rows) {
+
+              if (err) {
+                return res.status(500).json({ message: err.message });
+              }
+
+              // ✅ If exists → UPDATE
+              if (rows.length > 0) {
+
+                db.query(
+                  `UPDATE ebooks
+                   SET file_path=?, file_type='epub', price=?, sell_price=?
+                   WHERE product_id=?`,
+                  [
+                    epubPath,
+                    ebook_price || null,
+                    ebook_sell_price || null,
+                    productId
+                  ],
+                  function (err) {
+
+                    if (err) {
+                      return res.status(500).json({ message: err.message });
+                    }
+
+                    fs.unlink(file.path, () => {}); // cleanup docx
+
+                    return res.json({
+                      message: "Ebook converted & updated",
+                      epubPath,
+                      productId
+                    });
+
+                  }
+                );
+
+              }
+
+              // ✅ If not exists → INSERT
+              else {
+
+                db.query(
+                  `INSERT INTO ebooks
+                   (product_id, file_path, file_type, price, sell_price)
+                   VALUES (?, ?, 'epub', ?, ?)`,
+                  [
+                    productId,
+                    epubPath,
+                    ebook_price || null,
+                    ebook_sell_price || null
+                  ],
+                  function (err) {
+
+                    if (err) {
+                      return res.status(500).json({ message: err.message });
+                    }
+
+                    fs.unlink(file.path, () => {}); // cleanup docx
+
+                    return res.json({
+                      message: "Ebook converted & inserted",
+                      epubPath,
+                      productId
+                    });
+
+                  }
+                );
+
+              }
+
+            }
+          );
+
+        }
+      );
+
+    }
+  );
+
+}
+
 
 
 

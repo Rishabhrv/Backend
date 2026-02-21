@@ -5,6 +5,21 @@ const db = require("../db");
 const router = express.Router();
 const SECRET = "MY_SECRET_KEY";
 
+const multer = require("multer");
+const path = require("path");
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/reviews/");
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + "-" + file.originalname);
+  },
+});
+
+const upload = multer({ storage });
+
+
 /* ================= AUTH ================= */
 const auth = (req, res, next) => {
   const token = req.headers.authorization?.split(" ")[1];
@@ -35,14 +50,41 @@ router.get("/product/:productId", (req, res) => {
     ORDER BY r.created_at DESC
   `;
 
-  db.query(sql, [productId], (err, rows) => {
+  db.query(sql, [productId], (err, reviews) => {
     if (err) return res.status(500).json([]);
-    res.json(rows);
+
+    if (reviews.length === 0) return res.json([]);
+
+    const reviewIds = reviews.map(r => r.id);
+
+    db.query(
+      `SELECT review_id, image_path 
+       FROM review_images 
+       WHERE review_id IN (?)`,
+      [reviewIds],
+      (err2, images) => {
+        if (err2) return res.json(reviews);
+
+        const grouped = {};
+        images.forEach(img => {
+          if (!grouped[img.review_id]) grouped[img.review_id] = [];
+          grouped[img.review_id].push(img.image_path);
+        });
+
+        const finalData = reviews.map(r => ({
+          ...r,
+          images: grouped[r.id] || []
+        }));
+
+        res.json(finalData);
+      }
+    );
   });
 });
 
+
 /* ================= ADD / UPDATE REVIEW ================= */
-router.post("/", auth, (req, res) => {
+router.post("/", auth, upload.array("images", 5), (req, res) => {
   const { product_id, rating, comment } = req.body;
   const user_id = req.user.id;
 
@@ -50,7 +92,7 @@ router.post("/", auth, (req, res) => {
     return res.status(400).json({ message: "Invalid data" });
   }
 
-  const sql = `
+  const insertReview = `
     INSERT INTO reviews (product_id, user_id, rating, comment, status)
     VALUES (?, ?, ?, ?, 'pending')
     ON DUPLICATE KEY UPDATE
@@ -60,13 +102,90 @@ router.post("/", auth, (req, res) => {
       created_at = CURRENT_TIMESTAMP
   `;
 
-  db.query(sql, [product_id, user_id, rating, comment], (err) => {
-    if (err) return res.status(500).json({ message: "Failed" });
+  db.query(
+    insertReview,
+    [product_id, user_id, rating, comment],
+    (err, result) => {
+      if (err) return res.status(500).json({ message: "Failed" });
 
-    res.json({
-      message: "Review submitted for approval",
-      status: "pending",
-    });
+      const reviewId = result.insertId || result.insertId;
+
+      // Save images if uploaded
+      if (req.files && req.files.length > 0) {
+        const imageValues = req.files.map(file => [
+          reviewId,
+          "/uploads/reviews/" + file.filename
+        ]);
+
+        db.query(
+          "INSERT INTO review_images (review_id, image_path) VALUES ?",
+          [imageValues],
+          () => {
+            res.json({
+              message: "Review submitted with images",
+              status: "pending"
+            });
+          }
+        );
+      } else {
+        res.json({
+          message: "Review submitted",
+          status: "pending"
+        });
+      }
+    }
+  );
+});
+
+router.get("/latest", (req, res) => {
+
+  const sql = `
+    SELECT 
+      r.id,
+      r.rating,
+      r.comment,
+      r.created_at,
+      r.product_id,
+      u.name AS user_name,
+      p.title AS product_title,
+      p.main_image AS product_image
+    FROM reviews r
+    JOIN users u ON u.id = r.user_id
+    JOIN products p ON p.id = r.product_id
+    WHERE r.status = 'approved'
+    ORDER BY r.created_at DESC
+    LIMIT 5
+  `;
+
+  db.query(sql, (err, reviews) => {
+    if (err) return res.status(500).json([]);
+
+    if (reviews.length === 0) return res.json([]);
+
+    const reviewIds = reviews.map(r => r.id);
+
+    db.query(
+      `SELECT review_id, image_path 
+       FROM review_images 
+       WHERE review_id IN (?)`,
+      [reviewIds],
+      (err2, images) => {
+        if (err2) return res.json(reviews);
+
+        const grouped = {};
+        images.forEach(img => {
+          if (!grouped[img.review_id]) grouped[img.review_id] = [];
+          grouped[img.review_id].push(img.image_path);
+        });
+
+        const finalData = reviews.map(r => ({
+          ...r,
+          images: grouped[r.id] || []
+        }));
+
+        res.json(finalData);
+      }
+    );
   });
 });
 

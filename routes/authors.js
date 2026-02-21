@@ -206,5 +206,50 @@ router.post("/bulk-status", (req, res) => {
 });
 
 
+/* ─── ADD THIS ROUTE TO YOUR author.js ─── */
+
+/* GET SINGLE AUTHOR BY SLUG + THEIR BOOKS */
+router.get("/slug/:slug", (req, res) => {
+  const { slug } = req.params;
+
+  // First get the author
+  db.query(
+    `SELECT id, name, slug, profile_image, bio, status, created_at
+     FROM authors WHERE slug = ? AND status = 'active'`,
+    [slug],
+    (err, authors) => {
+      if (err) return res.status(500).json({ message: "DB error" });
+      if (!authors.length) return res.status(404).json({ message: "Author not found" });
+
+      const author = authors[0];
+
+      // Then get their books
+      db.query(
+        `SELECT 
+          p.id,
+          p.title,
+          p.slug,
+          p.main_image AS image,
+          p.price,
+          p.sell_price,
+          p.stock,
+          p.product_type,
+          p.status,
+          e.price        AS ebook_price,
+          e.sell_price   AS ebook_sell_price
+        FROM product_authors pa
+        JOIN products p ON p.id = pa.product_id
+        LEFT JOIN ebooks e ON e.product_id = p.id
+        WHERE pa.author_id = ? AND p.status = 'published'
+        ORDER BY p.created_at DESC`,
+        [author.id],
+        (err2, books) => {
+          if (err2) return res.status(500).json({ message: "DB error" });
+          res.json({ author, books });
+        }
+      );
+    }
+  );
+});
 
 module.exports = router;
