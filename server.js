@@ -15,6 +15,7 @@ app.use("/api/categories", require("./routes/categories"));
 app.use("/api/viewcategory", require("./routes/viewcategory")); 
 app.use("/api/products", require("./routes/products"));
 app.use("/uploads", express.static("uploads"));
+app.use("/api/media", require("./routes/media"));
 app.use("/api/attributes", require("./routes/attributes"));
 app.use("/api/authors", require("./routes/authors"));
 app.use("/api/account", require("./routes/account"));
@@ -24,13 +25,14 @@ app.use("/api/reviews", require("./routes/reviews"));
 app.use("/api/cart", require("./routes/cart"));
 app.use("/api/checkout", require("./routes/checkout"));
 app.use("/api/payment", require("./routes/payment"));
+app.use("/api/ebooks", require("./routes/ebooks"));
 app.use("/api/orders", require("./routes/orders"));
 app.use("/api/my-books", require("./routes/myBooks"));
 app.use("/api/subscription-payment", require("./routes/subscriptionpayment"));
 app.use("/api/subscriptions", require("./routes/subscriptions"));
 
 app.use("/api/admin", require("./routes/adminEbooks"));
-
+app.use("/api/admin", require("./routes/adminReviews"));
 
 app.use("/api/admin", require("./routes/users"));
 app.use("/api/admin", require("./routes/adminOrders"));

@@ -6,6 +6,20 @@ const db = require("../db");
 const router = express.Router();
 const SECRET = "MY_SECRET_KEY";
 
+const nodemailer = require("nodemailer");
+
+// In-memory OTP store (use Redis in production)
+const otpStore = new Map();
+
+// Configure your email transporter
+const transporter = nodemailer.createTransport({
+  service: "gmail", // or use SMTP config
+  auth: {
+    user: process.env.MAIL_USER,   // your email
+    pass: process.env.MAIL_PASS,   // app password
+  },
+});
+
 /* GET LOGGED IN USER */
 router.get("/me", (req, res) => {
   const authHeader = req.headers.authorization;
@@ -201,6 +215,95 @@ router.get("/profile", (req, res) => {
 });
 
 
+
+
+/* FORGOT PASSWORD - Send OTP */
+router.post("/forgot-password", async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ msg: "Email is required" });
+
+  // Check if user exists
+  db.query("SELECT id FROM users WHERE email = ?", [email], async (err, rows) => {
+    if (err) return res.status(500).json({ msg: "DB error" });
+    if (!rows.length) return res.status(404).json({ msg: "No account found with this email" });
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+    otpStore.set(email, { otp, expiresAt });
+
+    // Send OTP email
+    try {
+      await transporter.sendMail({
+        from: `"AGPH Support" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: "Your Password Reset OTP",
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto;">
+            <h2>Password Reset</h2>
+            <p>Use the OTP below to reset your password. It expires in <strong>10 minutes</strong>.</p>
+            <div style="font-size: 36px; font-weight: bold; letter-spacing: 8px; text-align: center; padding: 20px; background: #f4f4f4; border-radius: 8px;">
+              ${otp}
+            </div>
+            <p style="color: #888; margin-top: 16px;">If you didn't request this, please ignore this email.</p>
+          </div>
+        `,
+      });
+
+      res.json({ msg: "OTP sent to your email" });
+    } catch (emailErr) {
+      console.error("Email send error:", emailErr);
+      res.status(500).json({ msg: "Failed to send OTP email" });
+    }
+  });
+});
+
+
+/* VERIFY OTP */
+router.post("/verify-otp", (req, res) => {
+  const { email, otp } = req.body;
+  if (!email || !otp) return res.status(400).json({ msg: "Email and OTP are required" });
+
+  const record = otpStore.get(email);
+
+  if (!record) return res.status(400).json({ msg: "OTP not found. Please request a new one." });
+  if (Date.now() > record.expiresAt) {
+    otpStore.delete(email);
+    return res.status(400).json({ msg: "OTP has expired. Please request a new one." });
+  }
+  if (record.otp !== otp) return res.status(400).json({ msg: "Invalid OTP" });
+
+  // OTP is valid — don't delete yet, needed for reset-password verification
+  res.json({ msg: "OTP verified" });
+});
+
+
+/* RESET PASSWORD */
+router.post("/reset-password", async (req, res) => {
+  const { email, otp, newPassword } = req.body;
+  if (!email || !otp || !newPassword)
+    return res.status(400).json({ msg: "All fields are required" });
+
+  const record = otpStore.get(email);
+
+  if (!record) return res.status(400).json({ msg: "OTP not found. Please request a new one." });
+  if (Date.now() > record.expiresAt) {
+    otpStore.delete(email);
+    return res.status(400).json({ msg: "OTP has expired. Please request a new one." });
+  }
+  if (record.otp !== otp) return res.status(400).json({ msg: "Invalid OTP" });
+
+  // Hash new password
+  const hash = await bcrypt.hash(newPassword, 10);
+
+  db.query("UPDATE users SET password = ? WHERE email = ?", [hash, email], (err) => {
+    if (err) return res.status(500).json({ msg: "DB error" });
+
+    otpStore.delete(email); // Clear OTP after successful reset
+    res.json({ msg: "Password reset successfully" });
+  });
+});
 
 
 
