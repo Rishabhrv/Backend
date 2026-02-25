@@ -36,14 +36,19 @@ router.get("/", auth, (req, res) => {
 /* ================= PAID ORDERS GROUPED BY DATE ================= */
 router.get("/by-date", auth, (req, res) => {
   const sql = `
-    SELECT 
+   SELECT 
       o.id AS order_id,
       o.total_amount,
       o.created_at,
       DATE(o.created_at) AS order_date,
-      COUNT(oi.id) AS items_count
+      COUNT(DISTINCT oi.id) AS items_count,
+      COALESCE(s.shipping_cost, 0) AS shipping_cost
     FROM orders o
     JOIN order_items oi ON oi.order_id = o.id
+    JOIN products pr ON pr.id = oi.product_id
+    INNER JOIN product_categories pc ON pc.product_id = pr.id
+    INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
+    LEFT JOIN shipping s ON s.order_id = o.id
     WHERE o.user_id = ?
       AND o.payment_status = 'success'
     GROUP BY o.id
@@ -83,33 +88,49 @@ router.get("/:orderId", auth, (req, res) => {
   const userId = req.user.id;
   const orderId = req.params.orderId;
 
-  const sql = `
+ const sql = `
     SELECT 
       o.id AS order_id,
       o.total_amount,
       o.status,
       o.payment_status,
       o.created_at,
-
+  
       p.transaction_id,
       p.payment_method,
       p.amount AS paid_amount,
-
+  
       oi.product_id,
       oi.quantity,
       oi.price,
       oi.format,
-
+  
       pr.title,
-      pr.main_image
+      pr.main_image,
 
+      COALESCE(s.shipping_cost, 0) AS shipping_cost,
+
+      oa.first_name,
+      oa.last_name,
+      oa.address,
+      oa.city,
+      oa.state,
+      oa.pincode,
+      oa.phone,
+      oa.email AS shipping_email
+  
     FROM orders o
     JOIN order_items oi ON oi.order_id = o.id
     JOIN products pr ON pr.id = oi.product_id
     LEFT JOIN payments p ON p.order_id = o.id
-
+    LEFT JOIN shipping s ON s.order_id = o.id
+    LEFT JOIN order_address oa ON oa.order_id = o.id
+    INNER JOIN product_categories pc ON pc.product_id = pr.id
+    INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
+  
     WHERE o.id = ?
     AND o.user_id = ?
+    GROUP BY oi.id
   `;
 
   db.query(sql, [orderId, userId], (err, rows) => {

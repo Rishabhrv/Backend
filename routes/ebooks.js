@@ -25,7 +25,9 @@ router.get("/", (req, res) => {
   const conditions = [
     "p.status = 'published'",
     "(p.product_type = 'ebook' OR p.product_type = 'both')",
+    "c.imprint = 'agph'", // ← only agph categories
   ];
+
   const params = [];
 
   if (search) {
@@ -99,6 +101,7 @@ router.get("/", (req, res) => {
 
         -- categories (comma-separated)
         GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ',') AS categories,
+        GROUP_CONCAT(DISTINCT c.slug ORDER BY c.name SEPARATOR ',') AS category_slugs,
 
         -- rating
         ROUND(AVG(r.rating), 1)  AS avg_rating,

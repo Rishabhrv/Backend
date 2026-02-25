@@ -672,6 +672,7 @@ router.get("/", (req, res) => {
       p.main_image AS image,
       p.sku,
       p.stock,
+      p.slug,
       p.price,
       p.sell_price,
       p.status,
@@ -701,8 +702,6 @@ router.get("/", (req, res) => {
 
 
 
-
-
 /* ================= GET RANDOM FEATURED PRODUCT ================= */
 router.get("/random/featured", (req, res) => {
   const sql = `
@@ -715,15 +714,27 @@ router.get("/random/featured", (req, res) => {
       p.sell_price,
       p.main_image,
 
-      GROUP_CONCAT(a.name SEPARATOR ', ') AS authors
+      GROUP_CONCAT(DISTINCT a.name ORDER BY a.id SEPARATOR '||') AS authors,
+      GROUP_CONCAT(DISTINCT a.slug ORDER BY a.id SEPARATOR '||') AS author_slugs,
+
+      ROUND(AVG(r.rating), 1)  AS avg_rating,
+      COUNT(DISTINCT r.id)     AS review_count
 
     FROM products p
 
     LEFT JOIN product_authors pa 
       ON pa.product_id = p.id
-
     LEFT JOIN authors a 
       ON a.id = pa.author_id
+
+    LEFT JOIN reviews r
+      ON r.product_id = p.id AND r.status = 'approved'
+
+    /* Only products that belong to at least one agph category */
+    INNER JOIN product_categories pc
+      ON pc.product_id = p.id
+    INNER JOIN categories c
+      ON c.id = pc.category_id AND c.imprint = 'agph'
 
     WHERE p.status = 'published'
 
@@ -738,14 +749,23 @@ router.get("/random/featured", (req, res) => {
       return res.status(500).json({ message: "Database error" });
     }
 
-    if (!rows.length) {
-      return res.json(null);
-    }
+    if (!rows.length) return res.json(null);
 
-    res.json(rows[0]);
+    const row = rows[0];
+
+    // Parse authors and their slugs into an array of { name, slug }
+    const names  = row.authors      ? row.authors.split("||")      : [];
+    const slugs  = row.author_slugs ? row.author_slugs.split("||") : [];
+    const authors = names.map((name, i) => ({ name, slug: slugs[i] || null }));
+
+    res.json({
+      ...row,
+      authors,          // [{ name, slug }]
+      avg_rating:   row.avg_rating   ? parseFloat(row.avg_rating)  : 0,
+      review_count: row.review_count ? parseInt(row.review_count)  : 0,
+    });
   });
 });
-
 
 /* ================= GET PRODUCT BY SLUG (PUBLIC STORE) ================= */
 router.get("/slug/:slug", (req, res) => {
@@ -765,32 +785,33 @@ router.get("/slug/:slug", (req, res) => {
 
       MAX(sd.weight) AS weight,
       MAX(sd.length) AS length,
-      MAX(sd.width) AS width,
+      MAX(sd.width)  AS width,
       MAX(sd.height) AS height,
       
-      MAX(e.file_path) AS ebook_path,
-      MAX(e.price) AS ebook_price,
-      MAX(e.sell_price) AS ebook_sell_price,
+      MAX(e.file_path)   AS ebook_path,
+      MAX(e.price)       AS ebook_price,
+      MAX(e.sell_price)  AS ebook_sell_price,
 
-      GROUP_CONCAT(DISTINCT a.id) AS author_ids,
-      GROUP_CONCAT(DISTINCT a.name) AS author_names,
+      GROUP_CONCAT(DISTINCT a.id)            AS author_ids,
+      GROUP_CONCAT(DISTINCT a.name)          AS author_names,
       GROUP_CONCAT(DISTINCT a.profile_image) AS author_images,
-      GROUP_CONCAT(DISTINCT a.bio) AS author_bios,
-      GROUP_CONCAT(DISTINCT a.slug) AS author_slugs,
+      GROUP_CONCAT(DISTINCT a.bio)           AS author_bios,
+      GROUP_CONCAT(DISTINCT a.slug)          AS author_slugs,
 
-      GROUP_CONCAT(DISTINCT c.id) AS category_ids,
-      GROUP_CONCAT(DISTINCT c.name) AS category_names,
-      GROUP_CONCAT(DISTINCT c.slug) AS category_slugs
+      GROUP_CONCAT(DISTINCT c.id)      AS category_ids,
+      GROUP_CONCAT(DISTINCT c.name)    AS category_names,
+      GROUP_CONCAT(DISTINCT c.slug)    AS category_slugs,
+      GROUP_CONCAT(DISTINCT c.imprint) AS category_imprints  -- ← NEW
 
-      FROM products p
-      LEFT JOIN shipping_details sd ON sd.product_id = p.id
-      LEFT JOIN ebooks e ON e.product_id = p.id
-      LEFT JOIN product_authors pa ON pa.product_id = p.id
-      LEFT JOIN authors a ON a.id = pa.author_id
-      LEFT JOIN product_categories pc ON pc.product_id = p.id
-      LEFT JOIN categories c ON c.id = pc.category_id
-      WHERE p.slug = ?
-      GROUP BY p.id
+    FROM products p
+    LEFT JOIN shipping_details sd   ON sd.product_id = p.id
+    LEFT JOIN ebooks e              ON e.product_id  = p.id
+    LEFT JOIN product_authors pa    ON pa.product_id = p.id
+    LEFT JOIN authors a             ON a.id          = pa.author_id
+    LEFT JOIN product_categories pc ON pc.product_id = p.id
+    LEFT JOIN categories c          ON c.id          = pc.category_id
+    WHERE p.slug = ?
+    GROUP BY p.id
   `;
 
   db.query(sql, [slug], (err, rows) => {
@@ -805,23 +826,34 @@ router.get("/slug/:slug", (req, res) => {
 
     const product = rows[0];
 
+    // ── AGPH GATE: block if no agph category ─────────────────────────────
+    const imprints = product.category_imprints
+      ? product.category_imprints.split(",")
+      : [];
+
+    if (!imprints.includes("agph")) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
     /* ================= BUILD AUTHORS ================= */
     product.authors = product.author_ids
       ? product.author_ids.split(",").map((id, i) => ({
-          id: Number(id),
-          name: product.author_names?.split(",")[i] || "",
+          id:    Number(id),
+          name:  product.author_names?.split(",")[i]  || "",
           image: product.author_images?.split(",")[i] || null,
-          bio: product.author_bios?.split(",")[i] || null,
-          slug: product.author_slugs?.split(",")[i] || "", 
+          bio:   product.author_bios?.split(",")[i]   || null,
+          slug:  product.author_slugs?.split(",")[i]  || "",
         }))
       : [];
 
-    /* ================= BUILD CATEGORIES ================= */
+    /* ================= BUILD CATEGORIES (with imprint) ================= */
     product.categories = product.category_ids
       ? product.category_ids.split(",").map((id, i) => ({
-          id: Number(id),
-          name: product.category_names?.split(",")[i] || "",
-          slug: product.category_slugs?.split(",")[i] || "",
+          id:      Number(id),
+          name:    product.category_names?.split(",")[i]    || "",
+          slug:    product.category_slugs?.split(",")[i]    || "",
+          imprint: product.category_imprints?.split(",")[i] || "",  // ← NEW
         }))
       : [];
 
@@ -835,50 +867,37 @@ router.get("/slug/:slug", (req, res) => {
     delete product.category_ids;
     delete product.category_names;
     delete product.category_slugs;
+    delete product.category_imprints;
 
     /* ================= ATTRIBUTES ================= */
     db.query(
-      `
-      SELECT 
-        a.name,
-        pa.value
-      FROM product_attributes pa
-      JOIN attributes a 
-        ON a.id = pa.attribute_id
-      WHERE pa.product_id = ?
-      `,
+      `SELECT a.name, pa.value
+       FROM product_attributes pa
+       JOIN attributes a ON a.id = pa.attribute_id
+       WHERE pa.product_id = ?`,
       [product.id],
       (err, attributes) => {
-        if (err) {
-          console.error("Attributes error:", err);
-          return res.status(500).json({ message: "Attribute fetch failed" });
-        }
+        if (err) return res.status(500).json({ message: "Attribute fetch failed" });
 
         product.attributes = attributes || [];
 
         /* ================= GALLERY ================= */
         db.query(
-          `
-          SELECT image_path
-          FROM product_gallery
-          WHERE product_id = ?
-          ORDER BY sort_order ASC
-          `,
+          `SELECT image_path
+           FROM product_gallery
+           WHERE product_id = ?
+           ORDER BY sort_order ASC`,
           [product.id],
           (err, gallery) => {
-            if (err) {
-              console.error("Gallery error:", err);
-              return res.status(500).json({ message: "Gallery fetch failed" });
-            }
+            if (err) return res.status(500).json({ message: "Gallery fetch failed" });
 
             product.gallery = gallery || [];
-
             res.json(product);
           }
         );
       }
-    ); 
-  }); 
+    );
+  });
 });
 
 

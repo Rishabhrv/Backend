@@ -11,7 +11,8 @@ router.get("/", (req, res) => {
       c.name,
       c.parent_id,
       c.slug,
-      c.status
+      c.status,
+      c.imprint
     FROM categories c
     ORDER BY c.name ASC
   `;
@@ -36,7 +37,6 @@ router.get("/:slug/products", (req, res) => {
   const params = [slug];
   let typeFilter = "";
 
-  // ── Filter by product_type if provided ──────────────────────────────────
   if (product_type === "ebook") {
     typeFilter = `AND (p.product_type = 'ebook' OR p.product_type = 'both')`;
   } else if (product_type === "physical") {
@@ -79,20 +79,18 @@ router.get("/:slug/products", (req, res) => {
 });
 
 
-
-
 /* ADD CATEGORY */
 router.post("/", (req, res) => {
-  const { name, slug, status, parent_id } = req.body;
+  const { name, slug, status, parent_id, imprint } = req.body; // ← imprint added
 
   const sql = `
-    INSERT INTO categories (name, slug, status, parent_id)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO categories (name, slug, status, parent_id, imprint)
+    VALUES (?, ?, ?, ?, ?)
   `;
 
   db.query(
     sql,
-    [name, slug, status, parent_id || null],
+    [name, slug, status, parent_id || null, imprint || "agph"], // ← default agph
     (err, result) => {
       if (err) {
         if (err.code === "ER_DUP_ENTRY") {
@@ -112,17 +110,17 @@ router.post("/", (req, res) => {
 /* UPDATE CATEGORY */
 router.put("/:id", (req, res) => {
   const { id } = req.params;
-  const { name, slug, status, parent_id } = req.body;
+  const { name, slug, status, parent_id, imprint } = req.body; // ← imprint added
 
   const sql = `
     UPDATE categories
-    SET name = ?, slug = ?, status = ?, parent_id = ?
+    SET name = ?, slug = ?, status = ?, parent_id = ?, imprint = ?
     WHERE id = ?
   `;
 
   db.query(
     sql,
-    [name, slug, status, parent_id || null, id],
+    [name, slug, status, parent_id || null, imprint || "agph", id], // ← imprint added
     (err) => {
       if (err) return res.status(500).json(err);
       res.json({ message: "Category updated successfully" });
@@ -151,7 +149,7 @@ router.delete("/:id", (req, res) => {
 });
 
 
-
+/* BULK DELETE */
 router.post("/bulk-delete", (req, res) => {
   const { ids } = req.body;
 
@@ -200,12 +198,6 @@ router.post("/bulk-status", (req, res) => {
     }
   );
 });
-
-
-
-
-
-
 
 
 module.exports = router;

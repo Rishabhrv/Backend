@@ -81,7 +81,7 @@ router.post("/verify", auth, (req, res) => {
   }
 
   // ✅ SAVE PAYMENT ID + MARK PAID
-  db.query(
+db.query(
     `UPDATE orders 
      SET payment_status='success',
          status='paid',
@@ -89,10 +89,25 @@ router.post("/verify", auth, (req, res) => {
      WHERE id=?`,
     [razorpay_payment_id, order_id],
     () => {
+
+      // ── Reduce stock for paperback items ──────────────────────────
       db.query(
-        "DELETE FROM cart WHERE user_id=?",
-        [req.user.id],
-        () => res.json({ msg: "Payment verified & order completed" })
+        `UPDATE products p
+         JOIN order_items oi ON oi.product_id = p.id
+         SET p.stock = GREATEST(0, p.stock - oi.quantity)
+         WHERE oi.order_id = ?
+           AND oi.format = 'paperback'`,
+        [order_id],
+        (err) => {
+          if (err) console.error("Stock deduction error:", err);
+
+          // ── Clear cart ───────────────────────────────────────────
+          db.query(
+            "DELETE FROM cart WHERE user_id=?",
+            [req.user.id],
+            () => res.json({ msg: "Payment verified & order completed" })
+          );
+        }
       );
     }
   );

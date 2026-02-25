@@ -43,10 +43,19 @@ app.use("/api/admin", require("./routes/adminCoupons"));
 
 app.use("/api/mylibrary", require("./routes/mylibrary"));
 app.use("/api/payment-history", require("./routes/payment-history"));
+app.use("/api/coupons", require("./routes/coupons"))
 
 
 // ADMIN SECTION
 app.use("/api/shipping", require("./routes/shipping"));
+
+
+app.use("/api/ag-classics", require("./routes/agclassic"));
+
+
+
+
+
 
 // GLOBAL ERROR HANDLER (LAST MIDDLEWARE)
 app.use((err, req, res, next) => {
