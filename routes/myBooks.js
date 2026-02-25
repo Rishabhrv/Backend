@@ -33,6 +33,8 @@ router.get("/", auth, (req, res) => {
     FROM orders o
     JOIN order_items oi ON oi.order_id = o.id
     JOIN products p ON p.id = oi.product_id
+    INNER JOIN product_categories pc ON pc.product_id = p.id
+    INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
     WHERE o.user_id = ?
       AND o.payment_status = 'success'
       AND oi.format = 'ebook'
@@ -54,6 +56,8 @@ router.get("/:slug/read", auth, (req, res) => {
     SELECT e.file_path
     FROM ebooks e
     JOIN products p ON p.id = e.product_id
+    INNER JOIN product_categories pc ON pc.product_id = p.id
+    INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
     WHERE p.slug = ?
       AND (
         /* 🛒 PURCHASED */
@@ -103,6 +107,8 @@ router.get("/:slug/meta", auth, (req, res) => {
   const sql = `
     SELECT p.title
     FROM products p
+    INNER JOIN product_categories pc ON pc.product_id = p.id
+    INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
     WHERE p.slug = ?
       AND (
         EXISTS (

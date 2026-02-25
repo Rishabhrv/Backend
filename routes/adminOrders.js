@@ -235,7 +235,7 @@ router.get("/orders/:id", adminAuth, (req, res) => {
 
       const order = orderRows[0];
 
-      db.query(`SELECT * FROM user_addresses WHERE user_id = ? LIMIT 1`, [order.user_id], (err, addrRows) => {
+        db.query(`SELECT * FROM order_address WHERE order_id = ? LIMIT 1`, [orderId], (err, addrRows) => {
         if (err) return res.status(500).json({ msg: "DB error" });
 
         db.query(

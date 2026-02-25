@@ -136,7 +136,6 @@ router.post("/", auth, upload.array("images", 5), (req, res) => {
     }
   );
 });
-
 router.get("/latest", (req, res) => {
 
   const sql = `
@@ -152,22 +151,23 @@ router.get("/latest", (req, res) => {
     FROM reviews r
     JOIN users u ON u.id = r.user_id
     JOIN products p ON p.id = r.product_id
+    -- only products that belong to at least one agph category
+    INNER JOIN product_categories pc ON pc.product_id = p.id
+    INNER JOIN categories c ON c.id = pc.category_id AND c.imprint = 'agph'
     WHERE r.status = 'approved'
+    GROUP BY r.id
     ORDER BY r.created_at DESC
     LIMIT 5
   `;
 
   db.query(sql, (err, reviews) => {
     if (err) return res.status(500).json([]);
-
     if (reviews.length === 0) return res.json([]);
 
     const reviewIds = reviews.map(r => r.id);
 
     db.query(
-      `SELECT review_id, image_path 
-       FROM review_images 
-       WHERE review_id IN (?)`,
+      `SELECT review_id, image_path FROM review_images WHERE review_id IN (?)`,
       [reviewIds],
       (err2, images) => {
         if (err2) return res.json(reviews);

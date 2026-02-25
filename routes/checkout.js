@@ -78,21 +78,25 @@ router.post("/save-address", auth, (req, res) => {
 /* ================= CREATE ORDER ================= */
 router.post("/create", auth, (req, res) => {
   const user_id = req.user.id;
-  const { shipping = 0, couponCode } = req.body;
+    const { shipping = 0, couponCode, address } = req.body;
 
-  const cartSql = `
-    SELECT 
-      c.product_id,
-      c.format,
-      c.quantity,
-      p.sell_price AS paperback_price,
-      e.sell_price AS ebook_price,
-      p.product_type
-    FROM cart c
-    JOIN products p ON p.id = c.product_id
-    LEFT JOIN ebooks e ON e.product_id = p.id
-    WHERE c.user_id = ?
-  `;
+
+    const cartSql = `
+      SELECT 
+        c.product_id,
+        c.format,
+        c.quantity,
+        p.sell_price AS paperback_price,
+        e.sell_price AS ebook_price,
+        p.product_type
+      FROM cart c
+      JOIN products p ON p.id = c.product_id
+      LEFT JOIN ebooks e ON e.product_id = p.id
+      INNER JOIN product_categories pc ON pc.product_id = p.id
+      INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
+      WHERE c.user_id = ?
+      GROUP BY c.id
+    `;
 
   db.query(cartSql, [user_id], (err, items) => {
     if (err) return res.status(500).json(err);
@@ -134,7 +138,7 @@ router.post("/create", auth, (req, res) => {
             i.format === "ebook" ? 1 : i.quantity
           ]);
 
-          db.query(
+db.query(
             `INSERT INTO order_items 
              (order_id, product_id, format, price, quantity) 
              VALUES ?`,
@@ -147,6 +151,41 @@ router.post("/create", auth, (req, res) => {
                   `INSERT INTO coupon_usage (coupon_id, user_id, order_id)
                    VALUES (?, ?, ?)`,
                   [coupon_id, user_id, order_id]
+                );
+              }
+
+              if (Number(shipping) > 0) {
+                db.query(
+                  `INSERT INTO shipping (order_id, shipping_cost)
+                   VALUES (?, ?)
+                   ON DUPLICATE KEY UPDATE shipping_cost = VALUES(shipping_cost)`,
+                  [order_id, Number(shipping)],
+                  (err) => {
+                    if (err) console.error("Shipping cost save error:", err);
+                  }
+                );
+              }
+
+              // ── Save order address ────────────────────────────────
+              if (address && address.address) {
+                db.query(
+                  `INSERT INTO order_address
+                   (order_id, first_name, last_name, address, city, state, pincode, phone, email)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [
+                    order_id,
+                    address.first_name || "",
+                    address.last_name  || "",
+                    address.address    || "",
+                    address.city       || "",
+                    address.state      || "",
+                    address.pincode    || "",
+                    address.phone      || "",
+                    address.email      || "",
+                  ],
+                  (err) => {
+                    if (err) console.error("Order address save error:", err);
+                  }
                 );
               }
 
@@ -215,15 +254,18 @@ router.post("/shipping-cost", auth, (req, res) => {
   }
 
   // 1️⃣ Get cart with weights
-  const cartSql = `
-    SELECT 
-      c.quantity,
-      sd.weight
-    FROM cart c
-    JOIN shipping_details sd ON sd.product_id = c.product_id
-    WHERE c.user_id = ?
-    AND c.format = 'paperback'
-  `;
+    const cartSql = `
+      SELECT 
+        c.quantity,
+        sd.weight
+      FROM cart c
+      JOIN shipping_details sd ON sd.product_id = c.product_id
+      INNER JOIN product_categories pc ON pc.product_id = c.product_id
+      INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
+      WHERE c.user_id = ?
+      AND c.format = 'paperback'
+      GROUP BY c.id
+    `;
 
   db.query(cartSql, [userId], (err, items) => {
     if (err) return res.status(500).json(err);
@@ -324,7 +366,6 @@ router.post("/shipping-cost", auth, (req, res) => {
 
 
 /* ================= APPLY COUPON ================= */
-/* ================= APPLY COUPON ================= */
 router.post("/apply-coupon", auth, (req, res) => {
   const userId = req.user.id;
   const { code } = req.body;
@@ -413,11 +454,12 @@ router.post("/apply-coupon", auth, (req, res) => {
                     WHEN c.format = 'ebook' THEN e.sell_price
                     ELSE p.sell_price
                   END AS price,
-                  GROUP_CONCAT(pc.category_id) AS categories
+                  GROUP_CONCAT(DISTINCT pc.category_id) AS categories
                 FROM cart c
                 JOIN products p ON p.id = c.product_id
                 LEFT JOIN ebooks e ON e.product_id = p.id
-                LEFT JOIN product_categories pc ON pc.product_id = p.id
+                INNER JOIN product_categories pc ON pc.product_id = p.id
+                INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
                 WHERE c.user_id = ?
                 GROUP BY c.product_id, c.format, price
                 `,

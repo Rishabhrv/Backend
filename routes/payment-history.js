@@ -22,7 +22,7 @@ router.get("/", auth, async (req, res) => {
 
   try {
     /* ================= PRODUCT PAYMENTS ================= */
-    const productSql = `
+   const productSql = `
       SELECT
         o.id AS ref_id,
         'product' AS payment_type,
@@ -35,32 +35,18 @@ router.get("/", auth, async (req, res) => {
       FROM orders o
       WHERE o.user_id = ?
         AND o.payment_status = 'success'
-    `;
-
-    /* ================= SUBSCRIPTION PAYMENTS ================= */
-    const subscriptionSql = `
-      SELECT
-        sp.id AS ref_id,
-        'subscription' AS payment_type,
-        sp.amount,
-        sp.currency,
-        sp.status,
-        sp.created_at AS date,
-        CONCAT(p.title, ' (', us.months, ' months)') AS title,
-        sp.gateway_payment_id AS payment_id
-      FROM subscription_payments sp
-      JOIN user_subscriptions us 
-        ON us.id = sp.user_subscription_id
-      JOIN subscription_plans p 
-        ON p.id = us.plan_id
-      WHERE us.user_id = ?
-        AND sp.status = 'success'
+        AND EXISTS (
+          SELECT 1
+          FROM order_items oi
+          JOIN product_categories pc ON pc.product_id = oi.product_id
+          JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
+          WHERE oi.order_id = o.id
+        )
     `;
 
     const [products] = await db.promise().query(productSql, [userId]);
-    const [subscriptions] = await db.promise().query(subscriptionSql, [userId]);
 
-    const history = [...products, ...subscriptions].sort(
+    const history = [...products].sort(
       (a, b) => new Date(b.date) - new Date(a.date)
     );
 

@@ -105,11 +105,15 @@ router.get("/my", auth, (req, res) => {
       CASE 
         WHEN c.format = 'ebook' THEN e.sell_price
         ELSE p.sell_price
-      END AS price
+      END AS price,
+      GROUP_CONCAT(DISTINCT cat.imprint) AS category_imprints  -- ← NEW
     FROM cart c
     JOIN products p ON p.id = c.product_id
     LEFT JOIN ebooks e ON e.product_id = p.id
+    LEFT JOIN product_categories pc ON pc.product_id = p.id   -- ← NEW
+    LEFT JOIN categories cat ON cat.id = pc.category_id        -- ← NEW
     WHERE c.user_id = ?
+    GROUP BY c.id                                              -- ← NEW
   `;
 
   db.query(sql, [req.user.id], (err, rows) => {
@@ -151,7 +155,11 @@ router.delete("/remove/:id", auth, (req, res) => {
 
 router.get("/count", auth, (req, res) => {
   db.query(
-    "SELECT SUM(quantity) AS count FROM cart WHERE user_id=?",
+    `SELECT SUM(c.quantity) AS count 
+    FROM cart c
+    JOIN product_categories pc ON pc.product_id = c.product_id
+    JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
+    WHERE c.user_id = ?`,
     [req.user.id],
     (err, rows) => {
       if (err) return res.status(500).json({ count: 0 });
