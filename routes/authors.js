@@ -225,7 +225,8 @@ router.get("/slug/:slug", (req, res) => {
 
       // Then get their books
       db.query(
-        `SELECT 
+        `
+        SELECT 
           p.id,
           p.title,
           p.slug,
@@ -235,12 +236,16 @@ router.get("/slug/:slug", (req, res) => {
           p.stock,
           p.product_type,
           p.status,
-          e.price        AS ebook_price,
-          e.sell_price   AS ebook_sell_price
+          MAX(e.price)      AS ebook_price,
+          MAX(e.sell_price) AS ebook_sell_price
         FROM product_authors pa
         JOIN products p ON p.id = pa.product_id
         LEFT JOIN ebooks e ON e.product_id = p.id
-        WHERE pa.author_id = ? AND p.status = 'published'
+        INNER JOIN product_categories pc ON pc.product_id = p.id
+        INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
+        WHERE pa.author_id = ? 
+          AND p.status = 'published'
+        GROUP BY p.id
         ORDER BY p.created_at DESC`,
         [author.id],
         (err2, books) => {
