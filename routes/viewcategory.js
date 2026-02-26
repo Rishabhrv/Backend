@@ -78,33 +78,33 @@ router.get("/:slug/products", (req, res) => {
         if (!catIds.length) return res.json({ products: [], total: 0 });
 
         const productSql = `
-          SELECT
-            p.id,
-            p.title,
-            p.slug,
-            p.price,
-            p.sell_price,
-            p.stock,
-            p.product_type,
-            p.main_image,
-            e.price        AS ebook_price,
-            e.sell_price   AS ebook_sell_price,
-            COALESCE(ROUND(AVG(r.rating), 1), 0) AS rating
-          FROM products p
-          JOIN product_categories pc ON pc.product_id = p.id
-          LEFT JOIN ebooks e ON e.product_id = p.id
-          LEFT JOIN product_authors pa ON pa.product_id = p.id
-          LEFT JOIN reviews r
-            ON r.product_id = p.id AND r.status = 'approved'
-          WHERE pc.category_id IN (?)
-            AND p.status = 'published'
-            AND p.sell_price BETWEEN ? AND ?
-            AND p.title LIKE ?
-            AND (? = '' OR pa.author_id = ?)
-          GROUP BY p.id
-          HAVING rating >= ?
-          ORDER BY ${orderBy}
-          LIMIT ? OFFSET ?
+        SELECT
+          p.id,
+          p.title,
+          p.slug,
+          p.price,
+          p.sell_price,
+          p.stock,
+          p.product_type,
+          p.main_image,
+          MAX(e.price)        AS ebook_price,
+          MAX(e.sell_price)   AS ebook_sell_price,
+          COALESCE(ROUND(AVG(r.rating), 1), 0) AS rating
+        FROM products p
+        JOIN product_categories pc ON pc.product_id = p.id
+        LEFT JOIN ebooks e ON e.product_id = p.id
+        LEFT JOIN product_authors pa ON pa.product_id = p.id
+        LEFT JOIN reviews r
+          ON r.product_id = p.id AND r.status = 'approved'
+        WHERE pc.category_id IN (?)
+          AND p.status = 'published'
+          AND p.sell_price BETWEEN ? AND ?
+          AND p.title LIKE ?
+          AND (? = '' OR pa.author_id = ?)
+        GROUP BY p.id
+        HAVING rating >= ?
+        ORDER BY ${orderBy}
+        LIMIT ? OFFSET ?
         `;
 
         const countSql = `

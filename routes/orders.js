@@ -88,7 +88,7 @@ router.get("/:orderId", auth, (req, res) => {
   const userId = req.user.id;
   const orderId = req.params.orderId;
 
- const sql = `
+  const sql = `
     SELECT 
       o.id AS order_id,
       o.total_amount,
@@ -107,9 +107,9 @@ router.get("/:orderId", auth, (req, res) => {
   
       pr.title,
       pr.main_image,
-
+  
       COALESCE(s.shipping_cost, 0) AS shipping_cost,
-
+  
       oa.first_name,
       oa.last_name,
       oa.address,
@@ -130,7 +130,6 @@ router.get("/:orderId", auth, (req, res) => {
   
     WHERE o.id = ?
     AND o.user_id = ?
-    GROUP BY oi.id
   `;
 
   db.query(sql, [orderId, userId], (err, rows) => {
