@@ -31,6 +31,11 @@ app.use("/api/my-books", require("./routes/myBooks"));
 app.use("/api/subscription-payment", require("./routes/subscriptionpayment"));
 app.use("/api/subscriptions", require("./routes/subscriptions"));
 
+app.use("/api/seo", require("./routes/seoroutes"));
+
+app.use("/api/admin", require("./routes/adminnotifications").router);
+
+
 app.use("/api/admin", require("./routes/adminEbooks"));
 app.use("/api/admin", require("./routes/adminReviews"));
 
@@ -44,7 +49,8 @@ app.use("/api/admin", require("./routes/adminCoupons"));
 app.use("/api/mylibrary", require("./routes/mylibrary"));
 app.use("/api/payment-history", require("./routes/payment-history"));
 app.use("/api/coupons", require("./routes/coupons"))
-
+app.use("/api/order-confirmed", require("./routes/order-confirmed"));
+app.use('/api/invoice', require('./routes/invoice'));
 
 // ADMIN SECTION
 app.use("/api/shipping", require("./routes/shipping"));

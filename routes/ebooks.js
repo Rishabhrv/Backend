@@ -146,12 +146,27 @@ router.get("/hero-stats", (req, res) => {
       COUNT(DISTINCT p.id) AS total_ebooks,
       COUNT(DISTINCT a.id) AS total_authors
     FROM products p
-    LEFT JOIN ebooks e ON e.product_id = p.id
-    LEFT JOIN product_authors pa ON pa.product_id = p.id
-    LEFT JOIN authors a ON a.id = pa.author_id
+
+    INNER JOIN product_categories pc 
+      ON pc.product_id = p.id
+
+    INNER JOIN categories c 
+      ON c.id = pc.category_id
+
+    LEFT JOIN ebooks e 
+      ON e.product_id = p.id
+
+    LEFT JOIN product_authors pa 
+      ON pa.product_id = p.id
+
+    LEFT JOIN authors a 
+      ON a.id = pa.author_id
+
     WHERE p.status = 'published'
       AND (p.product_type = 'ebook' OR p.product_type = 'both')
+      AND c.imprint = 'agph'
   `;
+
   db.query(sql, (err, rows) => {
     if (err) return res.status(500).json({ message: "DB error" });
     res.json(rows[0]);

@@ -18,6 +18,7 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
+const { createAdminNotification } = require("./adminnotifications");
 
 
 /* ================= AUTH ================= */
@@ -109,6 +110,13 @@ router.post("/", auth, upload.array("images", 5), (req, res) => {
       if (err) return res.status(500).json({ message: "Failed" });
 
       const reviewId = result.insertId || result.insertId;
+
+      createAdminNotification(
+        "review",
+        "New Review Submitted",
+        `A review was submitted for product #${product_id} and is pending approval.`,
+        reviewId
+      );
 
       // Save images if uploaded
       if (req.files && req.files.length > 0) {
