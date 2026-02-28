@@ -4,6 +4,7 @@ const db = require("../db");
 const jwt = require("jsonwebtoken");
 
 const SECRET = "MY_SECRET_KEY";
+const { createAdminNotification } = require("./adminnotifications");
 
 /* 🔐 INLINE AUTH */
 const auth = (req, res, next) => {
@@ -240,7 +241,6 @@ router.post("/success", auth, (req, res) => {
                  WHERE id=?`,
                 [subscription_id],
                 () => {
-
                   /* 5️⃣ GRANT ACCESS */
                   db.query(
                     `INSERT INTO user_subscription_access
@@ -251,7 +251,28 @@ router.post("/success", auth, (req, res) => {
                      status='active'`,
                     [user_id, subscription_id, rows[0].end_date],
                     () => {
-                      res.json({ success: true });
+                      // 🔔 Notify admin of new subscription
+                      db.query(
+                        `SELECT u.name, u.email, sp.title AS plan_title
+                         FROM users u
+                         JOIN user_subscriptions us ON us.id = ?
+                         JOIN subscription_plans sp ON sp.id = us.plan_id
+                         WHERE u.id = ?`,
+                        [subscription_id, user_id],
+                        (err, infoRows) => {
+                          const name  = (!err && infoRows.length) ? infoRows[0].name       : "A user";
+                          const plan  = (!err && infoRows.length) ? infoRows[0].plan_title : "a plan";
+
+                          createAdminNotification(
+                            "subscription",
+                            "New Subscription Purchased",
+                            `${name} subscribed to ${plan} — ₹${amount}`,
+                            subscription_id
+                          );
+
+                          res.json({ success: true });
+                        }
+                      );
                     }
                   );
                 }

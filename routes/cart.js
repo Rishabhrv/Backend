@@ -101,19 +101,21 @@ router.get("/my", auth, (req, res) => {
       p.title,
       p.slug,
       p.main_image,
-      p.stock,                  
+      p.stock,
       CASE 
         WHEN c.format = 'ebook' THEN e.sell_price
         ELSE p.sell_price
       END AS price,
-      GROUP_CONCAT(DISTINCT cat.imprint) AS category_imprints  -- ← NEW
+      (
+        SELECT GROUP_CONCAT(DISTINCT cat.imprint)
+        FROM product_categories pc
+        JOIN categories cat ON cat.id = pc.category_id
+        WHERE pc.product_id = p.id
+      ) AS category_imprints
     FROM cart c
     JOIN products p ON p.id = c.product_id
     LEFT JOIN ebooks e ON e.product_id = p.id
-    LEFT JOIN product_categories pc ON pc.product_id = p.id   -- ← NEW
-    LEFT JOIN categories cat ON cat.id = pc.category_id        -- ← NEW
     WHERE c.user_id = ?
-    GROUP BY c.id                                              -- ← NEW
   `;
 
   db.query(sql, [req.user.id], (err, rows) => {

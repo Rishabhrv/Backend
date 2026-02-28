@@ -11,21 +11,21 @@ const nodemailer = require("nodemailer");
 // In-memory OTP store (use Redis in production)
 const otpStore = new Map();
 
-// Configure your email transporter
 const transporter = nodemailer.createTransport({
-  service: "gmail", // or use SMTP config
+  service: "gmail",
   auth: {
-    user: process.env.MAIL_USER,   // your email
-    pass: process.env.MAIL_PASS,   // app password
+    user: process.env.MAIL_USER,
+    pass: process.env.MAIL_PASS,
   },
 });
 
-/* GET LOGGED IN USER */
+
+/* ════════════════════════════════════════
+   GET LOGGED IN USER
+════════════════════════════════════════ */
 router.get("/me", (req, res) => {
   const authHeader = req.headers.authorization;
-
-  if (!authHeader)
-    return res.status(401).json({ msg: "No token" });
+  if (!authHeader) return res.status(401).json({ msg: "No token" });
 
   const token = authHeader.split(" ")[1];
 
@@ -37,9 +37,7 @@ router.get("/me", (req, res) => {
       [decoded.id],
       (err, rows) => {
         if (err) return res.status(500).json({ msg: "DB error" });
-        if (!rows.length)
-          return res.status(404).json({ msg: "User not found" });
-
+        if (!rows.length) return res.status(404).json({ msg: "User not found" });
         res.json(rows[0]);
       }
     );
@@ -47,9 +45,115 @@ router.get("/me", (req, res) => {
 });
 
 
-/* REGISTER */
+/* ════════════════════════════════════════
+   SEND REGISTRATION OTP
+   — Checks email not already taken, then sends OTP
+════════════════════════════════════════ */
+router.post("/send-register-otp", async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ msg: "Email is required" });
+
+  // Check if email already registered
+  db.query("SELECT id FROM users WHERE email = ?", [email], async (err, rows) => {
+    if (err) return res.status(500).json({ msg: "DB error" });
+    if (rows.length > 0)
+      return res.status(409).json({ msg: "Email already registered. Please login." });
+
+    const otp       = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 min
+
+    // Store with a "register" type so it can't be reused for password reset
+    otpStore.set(`register:${email}`, { otp, expiresAt });
+
+    try {
+      await transporter.sendMail({
+        from:    `"AGPH Books" <${process.env.MAIL_USER}>`,
+        to:      email,
+        subject: "Verify your email — AGPH Books",
+        html: `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 0;">
+    <tr><td align="center">
+      <table width="480" cellpadding="0" cellspacing="0"
+        style="max-width:480px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+        <!-- Header -->
+        <tr>
+          <td style="background:#111827;padding:28px 32px;">
+            <p style="margin:0;color:#fff;font-size:20px;font-weight:700;">AGPH Books</p>
+            <p style="margin:4px 0 0;color:rgba(255,255,255,0.55);font-size:12px;">Email Verification</p>
+          </td>
+        </tr>
+        <!-- Body -->
+        <tr>
+          <td style="padding:36px 32px;">
+            <h2 style="margin:0 0 10px;font-size:20px;color:#111827;">Verify your email</h2>
+            <p style="margin:0 0 28px;font-size:14px;color:#6b7280;line-height:1.6;">
+              Use the one-time code below to complete your registration. It expires in <strong>10 minutes</strong>.
+            </p>
+
+            <!-- OTP Box -->
+            <div style="text-align:center;margin:0 0 28px;">
+              <div style="display:inline-block;background:#f3f4f6;border:2px dashed #d1d5db;border-radius:12px;padding:20px 40px;">
+                <span style="font-size:40px;font-weight:800;letter-spacing:12px;color:#111827;font-family:monospace;">${otp}</span>
+              </div>
+            </div>
+
+            <p style="margin:0;font-size:13px;color:#9ca3af;">
+              If you didn't create an account with AGPH Books, you can safely ignore this email.
+            </p>
+          </td>
+        </tr>
+        <!-- Footer -->
+        <tr>
+          <td style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} AGPH Books. All rights reserved.</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`,
+      });
+
+      res.json({ msg: "OTP sent to your email" });
+    } catch (emailErr) {
+      console.error("Email send error:", emailErr);
+      res.status(500).json({ msg: "Failed to send OTP. Try again." });
+    }
+  });
+});
+
+
+/* ════════════════════════════════════════
+   REGISTER  (now requires OTP)
+   Body: { name, email, password, otp }
+════════════════════════════════════════ */
 router.post("/register", async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, password, otp } = req.body;
+
+  if (!name || !email || !password || !otp)
+    return res.status(400).json({ msg: "All fields including OTP are required" });
+
+  // Verify OTP
+  const key    = `register:${email}`;
+  const record = otpStore.get(key);
+
+  if (!record)
+    return res.status(400).json({ msg: "OTP not found. Please request a new one." });
+
+  if (Date.now() > record.expiresAt) {
+    otpStore.delete(key);
+    return res.status(400).json({ msg: "OTP has expired. Please request a new one." });
+  }
+
+  if (record.otp !== otp)
+    return res.status(400).json({ msg: "Invalid OTP. Please check and try again." });
+
+  // OTP valid — create the account
+  otpStore.delete(key);
 
   const hash = await bcrypt.hash(password, 10);
 
@@ -58,137 +162,112 @@ router.post("/register", async (req, res) => {
     [name, email, hash],
     (err) => {
       if (err) {
-        if (err.code === "ER_DUP_ENTRY") {
-          return res.status(400).json({
-            msg: "Email already exists. Please login.",
-          });
-        }
+        if (err.code === "ER_DUP_ENTRY")
+          return res.status(400).json({ msg: "Email already exists. Please login." });
         return res.status(500).json({ msg: "DB error" });
       }
-
-      res.json({ msg: "Registered successfully" });
+      res.json({ msg: "Account created successfully. Please login." });
     }
   );
 });
 
 
-/* LOGIN */
+/* ════════════════════════════════════════
+   LOGIN
+════════════════════════════════════════ */
 router.post("/login", (req, res) => {
   const { email, password } = req.body;
 
   db.query(
-    "SELECT id, password, provider FROM users WHERE email = ?",
+    "SELECT id, password, provider, status FROM users WHERE email = ?",
     [email],
     async (err, result) => {
       if (err) return res.status(500).json({ msg: "DB error" });
-
-      if (result.length === 0) {
+      if (result.length === 0)
         return res.status(400).json({ msg: "User not found" });
-      }
 
       const user = result[0];
 
-      // 🔥 VERY IMPORTANT
-      // if (user.provider !== "local") {
-      //   return res.status(400).json({
-      //     msg: "This email is registered with Google login.",
-      //   });
-      // }
+      if (user.status !== "active") {
+        return res.status(403).json({
+          msg: "Your account has been blocked. Please contact support.",
+        });
+      }
 
       const valid = await bcrypt.compare(password, user.password);
-      if (!valid) {
+      if (!valid)
         return res.status(400).json({ msg: "Wrong password" });
-      }
 
-      const token = jwt.sign(
-        { id: user.id },
-        SECRET,
-        { expiresIn: "1h" }
-      );
-
+      const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: "24h" });
       res.json({ token });
     }
   );
 });
 
 
+/* ════════════════════════════════════════
+   GOOGLE LOGIN
+════════════════════════════════════════ */
 router.post("/google/login", (req, res) => {
   const { email, google_id } = req.body;
-
   if (!email || !google_id)
     return res.status(400).json({ msg: "Invalid Google data" });
 
   db.query(
-    "SELECT id, provider FROM users WHERE email = ?",
+    "SELECT id, provider, status FROM users WHERE email = ?",
     [email],
     (err, users) => {
       if (err) return res.status(500).json({ msg: "DB error" });
+      if (users.length === 0)
+        return res.status(404).json({ msg: "Account not found. Please sign up first." });
 
-      if (users.length === 0) {
-        return res.status(404).json({
-          msg: "Account not found. Please sign up first.",
+      const user = users[0];
+
+      if (user.status !== "active") {
+        return res.status(403).json({
+          msg: "Your account has been blocked. Please contact support.",
         });
       }
 
-      if (users[0].provider !== "google") {
-        return res.status(400).json({
-          msg: "This email is registered with password login.",
-        });
-      }
+      if (user.provider !== "google")
+        return res.status(400).json({ msg: "This email is registered with password login." });
 
-      const token = jwt.sign(
-        { id: users[0].id, email },
-        SECRET,
-        { expiresIn: "1h" }
-      );
-
+      const token = jwt.sign({ id: user.id, email }, SECRET, { expiresIn: "1h" });
       res.json({ token });
     }
   );
 });
 
 
-
+/* ════════════════════════════════════════
+   GOOGLE REGISTER
+════════════════════════════════════════ */
 router.post("/google/register", (req, res) => {
   const { email, name, google_id } = req.body;
-
   if (!email || !google_id)
     return res.status(400).json({ msg: "Invalid Google data" });
 
-  db.query(
-    "SELECT id FROM users WHERE email = ?",
-    [email],
-    (err, users) => {
-      if (err) return res.status(500).json({ msg: "DB error" });
+  db.query("SELECT id FROM users WHERE email = ?", [email], (err, users) => {
+    if (err) return res.status(500).json({ msg: "DB error" });
+    if (users.length > 0)
+      return res.status(409).json({ msg: "Account already exists. Please login." });
 
-      if (users.length > 0) {
-        return res.status(409).json({
-          msg: "Account already exists. Please login.",
-        });
+    db.query(
+      "INSERT INTO users (name, email, google_id, provider) VALUES (?, ?, ?, 'google')",
+      [name || "Google User", email, google_id],
+      (err, result) => {
+        if (err) return res.status(500).json({ msg: "Insert failed" });
+        const token = jwt.sign({ id: result.insertId, email }, SECRET, { expiresIn: "1h" });
+        res.json({ token });
       }
-
-      db.query(
-        `INSERT INTO users (name, email, google_id, provider)
-         VALUES (?, ?, ?, 'google')`,
-        [name || "Google User", email, google_id],
-        (err, result) => {
-          if (err) return res.status(500).json({ msg: "Insert failed" });
-
-          const token = jwt.sign(
-            { id: result.insertId, email },
-            SECRET,
-            { expiresIn: "1h" }
-          );
-
-          res.json({ token });
-        }
-      );
-    }
-  );
+    );
+  });
 });
 
 
-/* GET FULL PROFILE */
+/* ════════════════════════════════════════
+   GET FULL PROFILE
+════════════════════════════════════════ */
 router.get("/profile", (req, res) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ msg: "No token" });
@@ -215,29 +294,26 @@ router.get("/profile", (req, res) => {
 });
 
 
-
-
-/* FORGOT PASSWORD - Send OTP */
+/* ════════════════════════════════════════
+   FORGOT PASSWORD — Send OTP
+════════════════════════════════════════ */
 router.post("/forgot-password", async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ msg: "Email is required" });
 
-  // Check if user exists
   db.query("SELECT id FROM users WHERE email = ?", [email], async (err, rows) => {
     if (err) return res.status(500).json({ msg: "DB error" });
     if (!rows.length) return res.status(404).json({ msg: "No account found with this email" });
 
-    // Generate 6-digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+    const otp       = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000;
 
     otpStore.set(email, { otp, expiresAt });
 
-    // Send OTP email
     try {
       await transporter.sendMail({
-        from: `"AGPH Support" <${process.env.EMAIL_USER}>`,
-        to: email,
+        from:    `"AGPH Support" <${process.env.MAIL_USER}>`,
+        to:      email,
         subject: "Your Password Reset OTP",
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto;">
@@ -250,7 +326,6 @@ router.post("/forgot-password", async (req, res) => {
           </div>
         `,
       });
-
       res.json({ msg: "OTP sent to your email" });
     } catch (emailErr) {
       console.error("Email send error:", emailErr);
@@ -260,13 +335,14 @@ router.post("/forgot-password", async (req, res) => {
 });
 
 
-/* VERIFY OTP */
+/* ════════════════════════════════════════
+   VERIFY OTP  (for password reset)
+════════════════════════════════════════ */
 router.post("/verify-otp", (req, res) => {
   const { email, otp } = req.body;
   if (!email || !otp) return res.status(400).json({ msg: "Email and OTP are required" });
 
   const record = otpStore.get(email);
-
   if (!record) return res.status(400).json({ msg: "OTP not found. Please request a new one." });
   if (Date.now() > record.expiresAt) {
     otpStore.delete(email);
@@ -274,19 +350,19 @@ router.post("/verify-otp", (req, res) => {
   }
   if (record.otp !== otp) return res.status(400).json({ msg: "Invalid OTP" });
 
-  // OTP is valid — don't delete yet, needed for reset-password verification
   res.json({ msg: "OTP verified" });
 });
 
 
-/* RESET PASSWORD */
+/* ════════════════════════════════════════
+   RESET PASSWORD
+════════════════════════════════════════ */
 router.post("/reset-password", async (req, res) => {
   const { email, otp, newPassword } = req.body;
   if (!email || !otp || !newPassword)
     return res.status(400).json({ msg: "All fields are required" });
 
   const record = otpStore.get(email);
-
   if (!record) return res.status(400).json({ msg: "OTP not found. Please request a new one." });
   if (Date.now() > record.expiresAt) {
     otpStore.delete(email);
@@ -294,17 +370,14 @@ router.post("/reset-password", async (req, res) => {
   }
   if (record.otp !== otp) return res.status(400).json({ msg: "Invalid OTP" });
 
-  // Hash new password
   const hash = await bcrypt.hash(newPassword, 10);
 
   db.query("UPDATE users SET password = ? WHERE email = ?", [hash, email], (err) => {
     if (err) return res.status(500).json({ msg: "DB error" });
-
-    otpStore.delete(email); // Clear OTP after successful reset
+    otpStore.delete(email);
     res.json({ msg: "Password reset successfully" });
   });
 });
-
 
 
 module.exports = router;

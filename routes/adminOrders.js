@@ -6,10 +6,6 @@ const db         = require("../db");
 
 const SECRET = "MY_SECRET_KEY";
 
-/* ─────────────────────────────────────
-   NODEMAILER SETUP
-   .env keys: MAIL_HOST, MAIL_PORT, MAIL_USER, MAIL_PASS, MAIL_FROM
-   ───────────────────────────────────── */
 const transporter = nodemailer.createTransport({
   host:   process.env.MAIL_HOST || "smtp.gmail.com",
   port:   Number(process.env.MAIL_PORT) || 587,
@@ -21,10 +17,22 @@ const transporter = nodemailer.createTransport({
 });
 
 /* ════════════════════════════════════════════════════════
-   EMAIL TEMPLATE
-   Accepts items[] = [{ title, format, quantity, price }]
+   UNIFIED STATUS MAP
 ════════════════════════════════════════════════════════ */
-function shippingEmailTemplate(status, customer, order, tracking, courier, items = []) {
+const UNIFIED_MAP = {
+  pending:          { orderStatus: "pending",   shippingStatus: null },
+  paid:             { orderStatus: "paid",      shippingStatus: null },
+  confirmed:        { orderStatus: "paid",      shippingStatus: "confirmed" },
+  shipped:          { orderStatus: "shipped",   shippingStatus: "shipped" },
+  out_for_delivery: { orderStatus: "shipped",   shippingStatus: "out_for_delivery" },
+  delivered:        { orderStatus: "completed", shippingStatus: "delivered" },
+  cancelled:        { orderStatus: "cancelled", shippingStatus: null },
+};
+
+/* ════════════════════════════════════════════════════════
+   EMAIL TEMPLATE  (now includes "cancelled")
+════════════════════════════════════════════════════════ */
+function shippingEmailTemplate(unifiedStatus, customer, order, tracking, courier, items = []) {
   const statusConfig = {
     confirmed: {
       subject:  `Order #${order.id} Confirmed — Thank you, ${customer.name}!`,
@@ -52,12 +60,23 @@ function shippingEmailTemplate(status, customer, order, tracking, courier, items
       body:     `Your order has been delivered. We hope you enjoy your purchase! If you have any issues please contact our support.`,
       color:    "#16a34a",
     },
+
+    /* ── CANCELLATION EMAIL ── */
+    cancelled: {
+      subject:  `Order #${order.id} Has Been Cancelled`,
+      headline: "Your order has been cancelled",
+      body:     `We're sorry to inform you that your order <strong>#${order.id}</strong> has been cancelled.
+                 If you believe this is a mistake or need further assistance, please reach out to our support team — we're here to help.
+                 ${order.total_amount > 0
+                   ? `Any amount paid will be refunded to your original payment method within <strong>5–7 business days</strong>.`
+                   : ""}`,
+      color:    "#dc2626",
+    },
   };
 
-  const cfg = statusConfig[status];
-  if (!cfg) return null;
+  const cfg = statusConfig[unifiedStatus];
+  if (!cfg) return null; // no email for pending / paid
 
-  /* ── Items rows ── */
   const itemRowsHTML = items.map((item, idx) => {
     const bg    = idx % 2 === 0 ? "#ffffff" : "#fafafa";
     const badge = item.format === "ebook"
@@ -66,7 +85,7 @@ function shippingEmailTemplate(status, customer, order, tracking, courier, items
     const lineTotal = `₹${(Number(item.price) * Number(item.quantity)).toFixed(2)}`;
     return `
       <tr style="border-top:1px solid #e5e7eb;background:${bg};">
-        <td style="padding:12px 8px 12px 0;font-size:13px;color:#111827;font-weight:500;vertical-align:middle;">${item.title}</td>
+        <td style="padding:12px 8px 12px 0;font-size:13px;color:#111827;font-weight:500;vertical-align:middle;">${item.title} ${badge}</td>
         <td style="padding:12px 16px;font-size:13px;color:#6b7280;text-align:center;vertical-align:middle;">×&nbsp;${item.quantity}</td>
         <td style="padding:12px 16px;font-size:13px;color:#111827;font-weight:600;text-align:right;vertical-align:middle;white-space:nowrap;">${lineTotal}</td>
       </tr>`;
@@ -83,98 +102,100 @@ function shippingEmailTemplate(status, customer, order, tracking, courier, items
       ${itemRowsHTML}
     </table>` : "";
 
-  /* ── Order summary ── */
   const orderDate = order.created_at
     ? new Date(order.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
     : "";
 
+  const subtotal     = items.reduce((sum, i) => sum + Number(i.price) * Number(i.quantity), 0);
+  const shippingCost = Number(order.shipping_cost || 0);
+
   const summaryHTML = `
     <table width="100%" cellpadding="0" cellspacing="0"
       style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:24px;border-collapse:collapse;">
-      <tr>
-        <td style="padding:16px 20px;">
-          <p style="margin:0 0 12px;font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">Order Summary</p>
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td style="font-size:13px;color:#6b7280;padding:4px 0;">Order ID</td>
-              <td style="font-size:13px;color:#111827;font-weight:600;text-align:right;">#${order.id}</td>
-            </tr>
-            ${orderDate ? `
-            <tr>
-              <td style="font-size:13px;color:#6b7280;padding:4px 0;">Order Date</td>
-              <td style="font-size:13px;color:#111827;font-weight:600;text-align:right;">${orderDate}</td>
-            </tr>` : ""}
-            ${courier ? `
-            <tr>
-              <td style="font-size:13px;color:#6b7280;padding:4px 0;">Courier</td>
-              <td style="font-size:13px;color:#111827;font-weight:600;text-align:right;">${courier}</td>
-            </tr>` : ""}
-            ${tracking ? `
-            <tr>
-              <td style="font-size:13px;color:#6b7280;padding:4px 0;">Tracking ID</td>
-              <td style="font-size:13px;color:#111827;font-weight:600;text-align:right;font-family:monospace;">${tracking}</td>
-            </tr>` : ""}
-            <tr>
-              <td colspan="2" style="padding-top:12px;border-top:1px solid #e5e7eb;"></td>
-            </tr>
-            <tr>
-              <td style="font-size:14px;font-weight:700;color:#111827;padding:4px 0;">Order Total</td>
-              <td style="font-size:14px;font-weight:700;color:#111827;text-align:right;">₹${order.total_amount}</td>
-            </tr>
-          </table>
-        </td>
-      </tr>
+      <tr><td style="padding:16px 20px;">
+        <p style="margin:0 0 12px;font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">Order Summary</p>
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="font-size:13px;color:#6b7280;padding:4px 0;">Order ID</td>
+            <td style="font-size:13px;color:#111827;font-weight:600;text-align:right;">#${order.id}</td>
+          </tr>
+          ${orderDate ? `<tr>
+            <td style="font-size:13px;color:#6b7280;padding:4px 0;">Order Date</td>
+            <td style="font-size:13px;color:#111827;font-weight:600;text-align:right;">${orderDate}</td>
+          </tr>` : ""}
+          ${courier ? `<tr>
+            <td style="font-size:13px;color:#6b7280;padding:4px 0;">Courier</td>
+            <td style="font-size:13px;color:#111827;font-weight:600;text-align:right;">${courier}</td>
+          </tr>` : ""}
+          ${tracking ? `<tr>
+            <td style="font-size:13px;color:#6b7280;padding:4px 0;">Tracking ID</td>
+            <td style="font-size:13px;color:#111827;font-weight:600;text-align:right;font-family:monospace;">${tracking}</td>
+          </tr>` : ""}
+          <tr>
+            <td style="font-size:13px;color:#6b7280;padding:4px 0;">Subtotal</td>
+            <td style="font-size:13px;color:#111827;text-align:right;">₹${subtotal.toFixed(2)}</td>
+          </tr>
+          <tr>
+            <td style="font-size:13px;color:#6b7280;padding:4px 0;">Shipping</td>
+            <td style="font-size:13px;color:#111827;text-align:right;">${shippingCost > 0 ? `₹${shippingCost.toFixed(2)}` : "Free"}</td>
+          </tr>
+          <tr><td colspan="2" style="padding-top:12px;border-top:1px solid #e5e7eb;"></td></tr>
+          <tr>
+            <td style="font-size:14px;font-weight:700;color:#111827;padding:4px 0;">Order Total</td>
+            <td style="font-size:14px;font-weight:700;color:#111827;text-align:right;">₹${order.total_amount}</td>
+          </tr>
+        </table>
+      </td></tr>
     </table>`;
+
+  /* Extra block shown only for cancelled — refund note */
+  const cancelNoteHTML = unifiedStatus === "cancelled" ? `
+    <table width="100%" cellpadding="0" cellspacing="0"
+      style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;margin-bottom:24px;border-collapse:collapse;">
+      <tr><td style="padding:16px 20px;">
+        <p style="margin:0 0 6px;font-size:13px;font-weight:700;color:#991b1b;">Cancellation Notice</p>
+        <p style="margin:0;font-size:13px;color:#7f1d1d;line-height:1.6;">
+          This order has been cancelled. If a payment was made, a refund will be processed to your
+          original payment method within <strong>5–7 business days</strong>.<br><br>
+          Questions? Email us at <a href="mailto:editor@agphbooks.com" style="color:#dc2626;">editor@agphbooks.com</a>
+        </p>
+      </td></tr>
+    </table>` : "";
 
   return {
     subject: cfg.subject,
     html: `<!DOCTYPE html>
 <html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-</head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:32px 0;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0"
-          style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-
-          <!-- Header -->
-          <tr>
-            <td style="background:${cfg.color};padding:24px 32px;">
-              <p style="margin:0;color:#fff;font-size:20px;font-weight:700;">AGPH Books</p>
-              <p style="margin:4px 0 0;color:rgba(255,255,255,0.75);font-size:12px;">Order #${order.id}</p>
-            </td>
-          </tr>
-
-          <!-- Body -->
-          <tr>
-            <td style="padding:32px;">
-              <h1 style="margin:0 0 8px;font-size:22px;color:#111827;">${cfg.headline}</h1>
-              <p style="margin:0 0 6px;font-size:14px;color:#6b7280;">Hello <strong>${customer.name}</strong>,</p>
-              <p style="margin:0 0 28px;font-size:14px;color:#374151;line-height:1.6;">${cfg.body}</p>
-
-              ${itemsTableHTML}
-              ${summaryHTML}
-
-              <p style="margin:0;font-size:13px;color:#9ca3af;">
-                If you have any questions, reply to this email or contact our support team.
-              </p>
-            </td>
-          </tr>
-
-          <!-- Footer -->
-          <tr>
-            <td style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;text-align:center;">
-              <p style="margin:0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} AGPH Books. All rights reserved.</p>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0"
+        style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+        <tr>
+          <td style="background:${cfg.color};padding:24px 32px;">
+            <p style="margin:0;color:#fff;font-size:20px;font-weight:700;">AGPH Books</p>
+            <p style="margin:4px 0 0;color:rgba(255,255,255,0.75);font-size:12px;">Order #${order.id}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:32px;">
+            <h1 style="margin:0 0 8px;font-size:22px;color:#111827;">${cfg.headline}</h1>
+            <p style="margin:0 0 6px;font-size:14px;color:#6b7280;">Hello <strong>${customer.name}</strong>,</p>
+            <p style="margin:0 0 28px;font-size:14px;color:#374151;line-height:1.6;">${cfg.body}</p>
+            ${cancelNoteHTML}
+            ${itemsTableHTML}
+            ${summaryHTML}
+            <p style="margin:0;font-size:13px;color:#9ca3af;">If you have any questions, reply to this email or contact our support team.</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} AGPH Books. All rights reserved.</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
   </table>
 </body>
 </html>`,
@@ -235,7 +256,7 @@ router.get("/orders/:id", adminAuth, (req, res) => {
 
       const order = orderRows[0];
 
-        db.query(`SELECT * FROM order_address WHERE order_id = ? LIMIT 1`, [orderId], (err, addrRows) => {
+      db.query(`SELECT * FROM order_address WHERE order_id = ? LIMIT 1`, [orderId], (err, addrRows) => {
         if (err) return res.status(500).json({ msg: "DB error" });
 
         db.query(
@@ -252,7 +273,8 @@ router.get("/orders/:id", adminAuth, (req, res) => {
 
               res.json({
                 order: {
-                  id: order.id, status: order.status,
+                  id: order.id,
+                  status: order.status,
                   payment_status: order.payment_status,
                   total_amount: order.total_amount,
                   created_at: order.created_at,
@@ -275,69 +297,80 @@ router.get("/orders/:id", adminAuth, (req, res) => {
 });
 
 /* ════════════════════════════════════════
-   PUT /api/admin/orders/:id/status
+   PUT /api/admin/orders/:id/unified-status
 ════════════════════════════════════════ */
-router.put("/orders/:id/status", adminAuth, (req, res) => {
-  const { status } = req.body;
-  const valid = ["pending", "paid", "shipped", "completed", "cancelled"];
-  if (!valid.includes(status)) return res.status(400).json({ msg: "Invalid status" });
-
-  db.query(`UPDATE orders SET status = ? WHERE id = ?`, [status, req.params.id], (err) => {
-    if (err) return res.status(500).json({ msg: "Update failed" });
-    res.json({ msg: "Order status updated" });
-  });
-});
-
-/* ════════════════════════════════════════
-   POST /api/admin/orders/:id/shipping
-   1. Upsert shipping row
-   2. Fetch order + customer + items
-   3. Send HTML email with full item list
-════════════════════════════════════════ */
-router.post("/orders/:id/shipping", adminAuth, async (req, res) => {
+router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
   const orderId = req.params.id;
-  const { courier, tracking_number, status } = req.body;
+  const { unifiedStatus, courier = "", tracking_number = "" } = req.body;
 
-  const columnMap = {
-    confirmed:        "confirmed_at",
-    shipped:          "shipped_at",
-    out_for_delivery: "out_for_delivery_at",
-    delivered:        "delivered_at",
-  };
+  // 1. Validate
+  const mapping = UNIFIED_MAP[unifiedStatus];
+  if (!mapping) return res.status(400).json({ msg: "Invalid status" });
 
-  const timeColumn = columnMap[status];
-  if (!timeColumn) return res.status(400).json({ msg: "Invalid shipping status" });
+  const { orderStatus, shippingStatus } = mapping;
 
-  /* 1. Upsert shipping */
-  db.query(
-    `INSERT INTO shipping (order_id, courier, tracking_number, status)
-     VALUES (?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       courier         = VALUES(courier),
-       tracking_number = VALUES(tracking_number),
-       status          = VALUES(status),
-       ${timeColumn}   = NOW()`,
-    [orderId, courier, tracking_number, status],
-    async (err) => {
-      if (err) return res.status(500).json({ msg: "Shipping update failed" });
+  // 2. Update orders.status
+  db.query(`UPDATE orders SET status = ? WHERE id = ?`, [orderStatus, orderId], async (err) => {
+    if (err) return res.status(500).json({ msg: "Failed to update order status" });
 
-      /* 2. Fetch order + customer */
+    // 3. Upsert shipping row (only when there is a shipping status)
+    const doShipping = (next) => {
+      if (!shippingStatus) return next();
+
+      const columnMap = {
+        confirmed:        "confirmed_at",
+        shipped:          "shipped_at",
+        out_for_delivery: "out_for_delivery_at",
+        delivered:        "delivered_at",
+      };
+      const timeCol = columnMap[shippingStatus];
+
       db.query(
-        `SELECT o.id, o.total_amount, o.created_at, u.name, u.email
+        `INSERT INTO shipping (order_id, courier, tracking_number, status)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           courier         = VALUES(courier),
+           tracking_number = VALUES(tracking_number),
+           status          = VALUES(status),
+           ${timeCol}      = NOW()`,
+        [orderId, courier, tracking_number, shippingStatus],
+        (err) => {
+          if (err) return res.status(500).json({ msg: "Failed to update shipping" });
+          next();
+        }
+      );
+    };
+
+    doShipping(async () => {
+      // 4. Send email for these statuses (now includes "cancelled")
+      const emailStatuses = ["confirmed", "shipped", "out_for_delivery", "delivered", "cancelled"];
+      if (!emailStatuses.includes(unifiedStatus)) {
+        return res.json({ msg: "Order status updated" });
+      }
+
+      db.query(
+        `SELECT o.id, o.total_amount, o.created_at,
+                u.name, u.email,
+                COALESCE(s.shipping_cost, 0) AS shipping_cost
          FROM orders o
          JOIN users u ON u.id = o.user_id
+         LEFT JOIN shipping s ON s.order_id = o.id
          WHERE o.id = ? LIMIT 1`,
         [orderId],
-        async (err, orderRows) => {
+        (err, orderRows) => {
           if (err || !orderRows.length) {
-            return res.json({ msg: "Shipping updated (email skipped: order not found)" });
+            return res.json({ msg: "Status updated (email skipped)" });
           }
 
           const row      = orderRows[0];
           const customer = { name: row.name, email: row.email };
-          const order    = { id: row.id, total_amount: row.total_amount, created_at: row.created_at };
+          const order    = {
+            id:            row.id,
+            total_amount:  row.total_amount,
+            created_at:    row.created_at,
+            shipping_cost: row.shipping_cost,
+          };
 
-          /* 3. Fetch order items */
           db.query(
             `SELECT p.title, oi.format, oi.quantity, oi.price
              FROM order_items oi
@@ -347,11 +380,10 @@ router.post("/orders/:id/shipping", adminAuth, async (req, res) => {
             async (err, items) => {
               const safeItems = (!err && Array.isArray(items)) ? items : [];
 
-              /* 4. Build + send email */
+              // 5. Build + send email
               const template = shippingEmailTemplate(
-                status, customer, order,
-                tracking_number, courier,
-                safeItems       // ← items now included
+                unifiedStatus, customer, order,
+                tracking_number, courier, safeItems
               );
 
               if (template && customer.email) {
@@ -364,17 +396,17 @@ router.post("/orders/:id/shipping", adminAuth, async (req, res) => {
                   });
                 } catch (mailErr) {
                   console.error("Mail send error:", mailErr.message);
-                  // still return success — shipping was saved
                 }
               }
 
-              res.json({ msg: "Shipping updated and customer notified" });
+              res.json({ msg: "Order updated & customer notified" });
             }
           );
         }
       );
-    }
-  );
+    });
+  });
 });
 
 module.exports = router;
+module.exports.shippingEmailTemplate = shippingEmailTemplate;

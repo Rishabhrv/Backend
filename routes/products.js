@@ -664,6 +664,7 @@ router.post(
 
 
 /* ================= GET PRODUCTS LIST ================= */
+/* ================= GET PRODUCTS LIST (updated) ================= */
 router.get("/", (req, res) => {
   const sql = `
     SELECT 
@@ -673,14 +674,19 @@ router.get("/", (req, res) => {
       p.sku,
       p.stock,
       p.slug,
+      p.description,
       p.price,
       p.sell_price,
       p.status,
       p.created_at AS date,
-      GROUP_CONCAT(c.name) AS categories
+      GROUP_CONCAT(DISTINCT c.name) AS categories,
+      sm.meta_title,
+      sm.meta_description,
+      sm.keywords
     FROM products p
     LEFT JOIN product_categories pc ON pc.product_id = p.id
     LEFT JOIN categories c ON c.id = pc.category_id
+    LEFT JOIN seo_meta sm ON sm.page_type = 'product' AND sm.page_id = p.id
     GROUP BY p.id
     ORDER BY p.created_at DESC
   `;
@@ -694,6 +700,10 @@ router.get("/", (req, res) => {
     const formatted = results.map((p) => ({
       ...p,
       categories: p.categories ? p.categories.split(",") : [],
+      meta_title: p.meta_title || "",
+      meta_description: p.meta_description || "",
+      keywords: p.keywords || "",
+      description: p.description || "",
     }));
 
     res.json(formatted);
@@ -771,48 +781,49 @@ router.get("/random/featured", (req, res) => {
 router.get("/slug/:slug", (req, res) => {
   const { slug } = req.params;
 
-  const sql = `
-    SELECT 
-      p.id,
-      p.title,
-      p.slug,
-      p.description,
-      p.price,
-      p.sell_price,
-      p.stock,
-      p.product_type,
-      p.main_image,
-
-      MAX(sd.weight) AS weight,
-      MAX(sd.length) AS length,
-      MAX(sd.width)  AS width,
-      MAX(sd.height) AS height,
-      
-      MAX(e.file_path)   AS ebook_path,
-      MAX(e.price)       AS ebook_price,
-      MAX(e.sell_price)  AS ebook_sell_price,
-
-      GROUP_CONCAT(DISTINCT a.id)            AS author_ids,
-      GROUP_CONCAT(DISTINCT a.name)          AS author_names,
-      GROUP_CONCAT(DISTINCT a.profile_image) AS author_images,
-      GROUP_CONCAT(DISTINCT a.bio)           AS author_bios,
-      GROUP_CONCAT(DISTINCT a.slug)          AS author_slugs,
-
-      GROUP_CONCAT(DISTINCT c.id)      AS category_ids,
-      GROUP_CONCAT(DISTINCT c.name)    AS category_names,
-      GROUP_CONCAT(DISTINCT c.slug)    AS category_slugs,
-      GROUP_CONCAT(DISTINCT c.imprint) AS category_imprints  -- ← NEW
-
-    FROM products p
-    LEFT JOIN shipping_details sd   ON sd.product_id = p.id
-    LEFT JOIN ebooks e              ON e.product_id  = p.id
-    LEFT JOIN product_authors pa    ON pa.product_id = p.id
-    LEFT JOIN authors a             ON a.id          = pa.author_id
-    LEFT JOIN product_categories pc ON pc.product_id = p.id
-    LEFT JOIN categories c          ON c.id          = pc.category_id
-    WHERE p.slug = ?
-    GROUP BY p.id
-  `;
+    const sql = `
+      SELECT 
+        p.id,
+        p.title,
+        p.slug,
+        p.description,
+        p.price,
+        p.sell_price,
+        p.stock,
+        p.product_type,
+        p.main_image,
+    
+        MAX(sd.weight) AS weight,
+        MAX(sd.length) AS length,
+        MAX(sd.width)  AS width,
+        MAX(sd.height) AS height,
+        
+        MAX(e.file_path)   AS ebook_path,
+        MAX(e.price)       AS ebook_price,
+        MAX(e.sell_price)  AS ebook_sell_price,
+    
+        GROUP_CONCAT(DISTINCT a.id)            AS author_ids,
+        GROUP_CONCAT(DISTINCT a.name)          AS author_names,
+        GROUP_CONCAT(DISTINCT a.profile_image) AS author_images,
+        GROUP_CONCAT(DISTINCT a.bio)           AS author_bios,
+        GROUP_CONCAT(DISTINCT a.slug)          AS author_slugs,
+    
+        GROUP_CONCAT(DISTINCT c.id)      AS category_ids,
+        GROUP_CONCAT(DISTINCT c.name)    AS category_names,
+        GROUP_CONCAT(DISTINCT c.slug)    AS category_slugs,
+        GROUP_CONCAT(DISTINCT c.imprint) AS category_imprints
+    
+      FROM products p
+      LEFT JOIN shipping_details sd   ON sd.product_id = p.id
+      LEFT JOIN ebooks e              ON e.product_id  = p.id
+      LEFT JOIN product_authors pa    ON pa.product_id = p.id
+      LEFT JOIN authors a             ON a.id          = pa.author_id
+      LEFT JOIN product_categories pc ON pc.product_id = p.id
+      LEFT JOIN categories c          ON c.id          = pc.category_id
+      WHERE p.slug = ?
+        AND p.status = 'published'
+      GROUP BY p.id
+    `;
 
   db.query(sql, [slug], (err, rows) => {
     if (err) {
@@ -1381,6 +1392,47 @@ router.post("/bulk-status", (req, res) => {
         return res.status(500).json({ message: "Bulk status update failed" });
       }
       res.json({ success: true });
+    }
+  );
+});
+
+
+router.post("/bulk-category", (req, res) => {
+  const { ids, categoryId } = req.body;
+
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ message: "No product IDs provided" });
+  }
+
+  if (!categoryId) {
+    return res.status(400).json({ message: "No category selected" });
+  }
+
+  // Step 1: Remove existing categories for all selected products
+  db.query(
+    `DELETE FROM product_categories WHERE product_id IN (?)`,
+    [ids],
+    (err) => {
+      if (err) {
+        console.error("Bulk category delete error:", err);
+        return res.status(500).json({ message: "Failed to update categories" });
+      }
+
+      // Step 2: Insert the new category for all selected products
+      const values = ids.map((id) => [id, categoryId]);
+
+      db.query(
+        `INSERT INTO product_categories (product_id, category_id) VALUES ?`,
+        [values],
+        (err) => {
+          if (err) {
+            console.error("Bulk category insert error:", err);
+            return res.status(500).json({ message: "Failed to assign category" });
+          }
+
+          res.json({ success: true, message: "Categories updated" });
+        }
+      );
     }
   );
 });
