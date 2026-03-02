@@ -392,7 +392,6 @@ const generateUniqueSlug = (baseSlug, callback) => {
   checkSlug();
 };
 
-
 /* ADD PRODUCT */
 router.post(
   "/",
@@ -435,228 +434,167 @@ router.post(
       productSql,
       [title, slug, description, price, sell_price, stock, sku, product_type, status, imagePath],
       (err, result) => {
-        if (err) return res.status(500).json(err);
+        if (err) return res.status(500).json({ message: err.message });
 
         const productId = result.insertId;
 
-        /* ---------- EBOOK SAVE ---------- */
+        // ── Save all related data (fire and forget) ──────────────────
+        const saveRelatedData = () => {
+
+          /* ---------- SHIPPING SAVE ---------- */
+          if (product_type === "physical" || product_type === "both") {
+            db.query(
+              `INSERT INTO shipping_details (product_id, weight, length, width, height) VALUES (?, ?, ?, ?, ?)`,
+              [productId, weight, length, width, height]
+            );
+          }
+
+          /* ---------- SAVE PRODUCT ATTRIBUTES ---------- */
+          if (req.body.attributes) {
+            const attributes = JSON.parse(req.body.attributes);
+            attributes.forEach((attr) => {
+              const name = attr.name?.trim();
+              const value = attr.values?.trim();
+              if (!name || !value) return;
+              db.query("INSERT IGNORE INTO attributes (name) VALUES (?)", [name], () => {
+                db.query("SELECT id FROM attributes WHERE name = ?", [name], (err, rows) => {
+                  if (err || !rows.length) return;
+                  db.query(
+                    `INSERT INTO product_attributes (product_id, attribute_id, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)`,
+                    [productId, rows[0].id, value]
+                  );
+                });
+              });
+            });
+          }
+
+          /* ---------- SAVE PRODUCT CATEGORIES ---------- */
+          if (req.body.categories) {
+            const categories = JSON.parse(req.body.categories);
+            categories.forEach((categoryId) => {
+              db.query(
+                `INSERT IGNORE INTO product_categories (product_id, category_id) VALUES (?, ?)`,
+                [productId, categoryId]
+              );
+            });
+          }
+
+          /* ---------- PRODUCT GALLERY ---------- */
+          if (req.files.gallery) {
+            req.files.gallery.forEach((file, index) => {
+              db.query(
+                `INSERT INTO product_gallery (product_id, image_path, sort_order) VALUES (?, ?, ?)`,
+                [productId, `/uploads/gallery/${file.filename}`, index]
+              );
+            });
+          }
+
+          /* ---------- SAVE SUBJECTS ---------- */
+          if (req.body.subjects) {
+            const subjects = JSON.parse(req.body.subjects);
+            subjects.forEach((subjectId) => {
+              db.query(
+                `INSERT IGNORE INTO product_subjects (product_id, subject_id) VALUES (?, ?)`,
+                [productId, subjectId]
+              );
+            });
+          }
+
+          /* ---------- SAVE SEO META ---------- */
+          const { meta_title, meta_description, keywords } = req.body;
+          if (meta_title || meta_description || keywords) {
+            db.query(
+              `INSERT INTO seo_meta (page_type, page_id, meta_title, meta_description, keywords) VALUES (?, ?, ?, ?, ?)`,
+              ["product", productId, meta_title || null, meta_description || null, keywords || null]
+            );
+          }
+
+          /* ---------- SAVE PRODUCT AUTHORS ---------- */
+          if (req.body.authors) {
+            const authors = JSON.parse(req.body.authors);
+            authors.forEach((authorId) => {
+              db.query(
+                `INSERT IGNORE INTO product_authors (product_id, author_id) VALUES (?, ?)`,
+                [productId, authorId]
+              );
+            });
+          }
+        };
+
+        // ── Handle ebook then respond ONCE ──────────────────────────
         if (req.files.ebook) {
           const ebookFile = req.files.ebook[0];
           const ext = path.extname(ebookFile.originalname).toLowerCase();
           const uploadPath = path.join(__dirname, "..", "uploads/ebooks");
           const originalPath = path.join(uploadPath, ebookFile.filename);
-        
+
           if (ext === ".epub") {
-        
+
             db.query(
-              `INSERT INTO ebooks 
-               (product_id, file_path, file_type, price, sell_price)
-               VALUES (?, ?, ?, ?, ?)`,
-              [
-                productId,
-                `/uploads/ebooks/${ebookFile.filename}`,
-                "epub",
-                ebook_price || null,
-                ebook_sell_price || null,
-              ],
+              `INSERT INTO ebooks (product_id, file_path, file_type, price, sell_price) VALUES (?, ?, ?, ?, ?)`,
+              [productId, `/uploads/ebooks/${ebookFile.filename}`, "epub", ebook_price || null, ebook_sell_price || null],
               function (err) {
                 if (err) {
                   console.error(err);
                   return res.status(500).json({ message: "Ebook save failed" });
                 }
-                res.json({ message: "Product created", productId });
+                saveRelatedData();
+                return res.json({ message: "Product created", productId }); // ✅ response 1
               }
             );
-        
+
           } else if (ext === ".docx") {
-        
+
             mammoth.convertToHtml(
-          { path: originalPath },
-          {
-            convertImage: mammoth.images.inline(function (element) {
-              return element.read("base64").then(function (imageBuffer) {
-                return {
-                  src: "data:" + element.contentType + ";base64," + imageBuffer
-                };
-              });
-            })
-          }
-        )
-
-      .then(function (result) {
-
-        const htmlContent = result.value;
-        const epubFilename = ebookFile.filename.replace(".docx", ".epub");
-        const epubPath = path.join(uploadPath, epubFilename);
-
-        const options = {
-          title: title,
-          author: "Unknown",
-          content: [
-            {
-              title: title,
-              data: htmlContent,
-            },
-          ],
-        };
-
-        return new Epub(options, epubPath).promise
-          .then(function () {
-
-            // delete original docx
-            fs.unlink(originalPath, function () {});
-
-            // save epub in DB
-            db.query(
-              `INSERT INTO ebooks 
-               (product_id, file_path, file_type, price, sell_price)
-               VALUES (?, ?, ?, ?, ?)`,
-              [
-                productId,
-                `/uploads/ebooks/${epubFilename}`,
-                "epub",
-                ebook_price || null,
-                ebook_sell_price || null,
-              ],
-              function (err) {
-                if (err) {
-                  console.error(err);
-                  return res.status(500).json({ message: "Ebook save failed" });
-                }
-
-                res.json({ message: "Product created", productId });
+              { path: originalPath },
+              {
+                convertImage: mammoth.images.inline(function (element) {
+                  return element.read("base64").then(function (imageBuffer) {
+                    return { src: "data:" + element.contentType + ";base64," + imageBuffer };
+                  });
+                })
               }
-            );
-
-          });
-
-      })
-      .catch(function (err) {
-        console.error("DOCX conversion error:", err);
-        res.status(500).json({ message: "DOCX conversion failed" });
-      });
-
-  } else {
-    return res.status(400).json({
-      message: "Only .docx or .epub allowed",
-    });
-  }
-
-} else {
-  // If no ebook uploaded
-  res.json({ message: "Product created", productId });
-}
-
-
-        /* ---------- SHIPPING SAVE ---------- */
-        if (product_type === "physical" || product_type === "both") {
-          db.query(
-            `INSERT INTO shipping_details
-             (product_id, weight, length, width, height)
-             VALUES (?, ?, ?, ?, ?)`,
-            [productId, weight, length, width, height]
-          );
-        }
-
-        /* ---------- SAVE PRODUCT ATTRIBUTES ---------- */
-        if (req.body.attributes) {
-          const attributes = JSON.parse(req.body.attributes);
-        
-          attributes.forEach((attr) => {
-            const name = attr.name?.trim();
-            const value = attr.values?.trim();
-        
-            if (!name || !value) return;
-        
-            db.query(
-              "INSERT IGNORE INTO attributes (name) VALUES (?)",
-              [name],
-              () => {
+            )
+            .then(function (result) {
+              const htmlContent = result.value;
+              const epubFilename = ebookFile.filename.replace(".docx", ".epub");
+              const epubPath = path.join(uploadPath, epubFilename);
+              const options = {
+                title: title,
+                author: "Unknown",
+                content: [{ title: title, data: htmlContent }],
+              };
+              return new Epub(options, epubPath).promise.then(function () {
+                fs.unlink(originalPath, function () {});
                 db.query(
-                  "SELECT id FROM attributes WHERE name = ?",
-                  [name],
-                  (err, rows) => {
-                    if (err || !rows.length) return;
-        
-                    db.query(
-                      `INSERT INTO product_attributes
-                       (product_id, attribute_id, value)
-                       VALUES (?, ?, ?)
-                       ON DUPLICATE KEY UPDATE value = VALUES(value)`,
-                      [productId, rows[0].id, value]
-                    );
+                  `INSERT INTO ebooks (product_id, file_path, file_type, price, sell_price) VALUES (?, ?, ?, ?, ?)`,
+                  [productId, `/uploads/ebooks/${epubFilename}`, "epub", ebook_price || null, ebook_sell_price || null],
+                  function (err) {
+                    if (err) {
+                      console.error(err);
+                      return res.status(500).json({ message: "Ebook save failed" });
+                    }
+                    saveRelatedData();
+                    return res.json({ message: "Product created", productId }); // ✅ response 2
                   }
                 );
-              }
-            );
-          });
+              });
+            })
+            .catch(function (err) {
+              console.error("DOCX conversion error:", err);
+              return res.status(500).json({ message: "DOCX conversion failed" });
+            });
+
+          } else {
+            return res.status(400).json({ message: "Only .docx or .epub allowed" });
+          }
+
+        } else {
+          // No ebook uploaded
+          saveRelatedData();
+          return res.json({ message: "Product created", productId }); // ✅ response 3
         }
 
-        /* ---------- SAVE PRODUCT CATEGORIES ---------- */
-        if (req.body.categories) {
-          const categories = JSON.parse(req.body.categories);
-        
-          categories.forEach((categoryId) => {
-            db.query(
-              `INSERT IGNORE INTO product_categories
-               (product_id, category_id)
-               VALUES (?, ?)`,
-              [productId, categoryId]
-            );
-          });
-        }
-
-        /* ---------- PRODUCT GALLERY ---------- */
-        if (req.files.gallery) {
-          req.files.gallery.forEach((file, index) => {
-            db.query(
-              `INSERT INTO product_gallery
-              (product_id, image_path, sort_order)
-              VALUES (?, ?, ?)`,
-              [
-                productId,
-                `/uploads/gallery/${file.filename}`,
-                index,
-              ]
-            );
-          });
-        }
-        /* ---------- SAVE SEO META ---------- */
-        const { meta_title, meta_description, keywords } = req.body;
-        
-        if (meta_title || meta_description || keywords) {
-          db.query(
-            `INSERT INTO seo_meta
-            (page_type, page_id, meta_title, meta_description, keywords)
-            VALUES (?, ?, ?, ?, ?)`,
-            [
-              "product",
-              productId,
-              meta_title || null,
-              meta_description || null,
-              keywords || null,
-            ]
-          );
-        }
-
-        /* ---------- SAVE PRODUCT AUTHORS ---------- */
-        if (req.body.authors) {
-          const authors = JSON.parse(req.body.authors);
-        
-          authors.forEach((authorId) => {
-            db.query(
-              `INSERT IGNORE INTO product_authors
-               (product_id, author_id)
-               VALUES (?, ?)`,
-              [productId, authorId]
-            );
-          });
-        }
-
-
-
-
-        res.json({ message: "Product created", productId });
       }
     );
   }
@@ -664,7 +602,6 @@ router.post(
 
 
 /* ================= GET PRODUCTS LIST ================= */
-/* ================= GET PRODUCTS LIST (updated) ================= */
 router.get("/", (req, res) => {
   const sql = `
 SELECT 
@@ -891,34 +828,50 @@ router.get("/slug/:slug", (req, res) => {
     delete product.category_slugs;
     delete product.category_imprints;
 
-    /* ================= ATTRIBUTES ================= */
+/* ================= ATTRIBUTES ================= */
+db.query(
+  `SELECT a.name, pa.value
+   FROM product_attributes pa
+   JOIN attributes a ON a.id = pa.attribute_id
+   WHERE pa.product_id = ?`,
+  [product.id],
+  (err, attributes) => {
+    if (err) return res.status(500).json({ message: "Attribute fetch failed" });
+
+    product.attributes = attributes || [];
+
+    /* ================= GALLERY ================= */
     db.query(
-      `SELECT a.name, pa.value
-       FROM product_attributes pa
-       JOIN attributes a ON a.id = pa.attribute_id
-       WHERE pa.product_id = ?`,
+      `SELECT image_path
+       FROM product_gallery
+       WHERE product_id = ?
+       ORDER BY sort_order ASC`,
       [product.id],
-      (err, attributes) => {
-        if (err) return res.status(500).json({ message: "Attribute fetch failed" });
+      (err, gallery) => {
+        if (err) return res.status(500).json({ message: "Gallery fetch failed" });
 
-        product.attributes = attributes || [];
+        product.gallery = gallery || [];
 
-        /* ================= GALLERY ================= */
+        /* ================= SUBJECTS ================= */
         db.query(
-          `SELECT image_path
-           FROM product_gallery
-           WHERE product_id = ?
-           ORDER BY sort_order ASC`,
+          `SELECT s.id, s.name, s.slug
+           FROM product_subjects ps
+           JOIN subjects s ON s.id = ps.subject_id
+           WHERE ps.product_id = ?`,
           [product.id],
-          (err, gallery) => {
-            if (err) return res.status(500).json({ message: "Gallery fetch failed" });
+          (err, subjects) => {
+            if (err) return res.status(500).json({ message: "Subject fetch failed" });
 
-            product.gallery = gallery || [];
+            product.subjects = subjects || [];
+
+            // ✅ ONE single res.json at the very end
             res.json(product);
           }
         );
       }
     );
+  }
+);
   });
 });
 
@@ -1153,6 +1106,18 @@ router.put(
               `INSERT INTO product_authors (product_id, author_id)
                VALUES (?, ?)`,
               [id, authorId]
+            );
+          });
+        }
+      });
+
+      /* ---------------- SUBJECTS ---------------- */
+      db.query(`DELETE FROM product_subjects WHERE product_id = ?`, [id], () => {
+        if (req.body.subjects) {
+          JSON.parse(req.body.subjects).forEach((subjectId) => {
+            db.query(
+              `INSERT IGNORE INTO product_subjects (product_id, subject_id) VALUES (?, ?)`,
+              [id, subjectId]
             );
           });
         }
