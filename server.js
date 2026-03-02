@@ -31,7 +31,7 @@ app.use("/api/my-books", require("./routes/myBooks"));
 app.use("/api/subscription-payment", require("./routes/subscriptionpayment"));
 app.use("/api/subscriptions", require("./routes/subscriptions"));
 
-app.use("/api/seo", require("./routes/Seoroutes"));
+app.use("/api/seo", require("./routes/seoroutes"));
 
 app.use("/api/admin", require("./routes/adminnotifications").router);
 
