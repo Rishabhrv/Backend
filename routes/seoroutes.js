@@ -40,3 +40,19 @@ router.get("/product/:productId", (req, res) => {
 
 
 module.exports = router;
+
+
+[{
+	"resource": "/c:/Users/rc/Desktop/My Work/E Book/backend/server.js",
+	"owner": "typescript",
+	"code": "1149",
+	"severity": 8,
+	"message": "File name 'c:/Users/rc/Desktop/My Work/E Book/backend/routes/seoroutes.js' differs from already included file name 'c:/Users/rc/Desktop/My Work/E Book/backend/routes/Seoroutes.js' only in casing.\n  The file is in the program because:\n    Root file specified for compilation\n    Imported via \"./routes/seoroutes\" from file 'c:/Users/rc/Desktop/My Work/E Book/backend/server.js'",
+	"source": "ts",
+	"startLineNumber": 34,
+	"startColumn": 29,
+	"endLineNumber": 34,
+	"endColumn": 49,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+}]

@@ -38,6 +38,7 @@ router.get("/:slug/products", (req, res) => {
     search = "",
     rating = 0,
     author = "",
+    subject = "",
     sort = "latest",
     page = 1,
     limit = 12,
@@ -49,7 +50,6 @@ router.get("/:slug/products", (req, res) => {
   if (sort === "price_low")  orderBy = "p.sell_price ASC";
   if (sort === "price_high") orderBy = "p.sell_price DESC";
 
-  // First resolve the category id and check if it has children
   db.query(
     `SELECT id, parent_id FROM categories WHERE slug = ? AND imprint = 'agph' LIMIT 1`,
     [slug],
@@ -59,93 +59,90 @@ router.get("/:slug/products", (req, res) => {
 
       const cat = cats[0];
 
-      // Build the category condition:
-      // If this category has children → use all child IDs
-      // If it has no children → use its own ID
-      const catResolveSql = `
-        SELECT id FROM categories
-        WHERE imprint = 'agph'
-          AND (
-            id = ?
-            OR parent_id = ?
-          )
-      `;
+      db.query(
+        `SELECT id FROM categories WHERE imprint = 'agph' AND (id = ? OR parent_id = ?)`,
+        [cat.id, cat.id],
+        (err2, catRows) => {
+          if (err2) return res.status(500).json(err2);
 
-      db.query(catResolveSql, [cat.id, cat.id], (err2, catRows) => {
-        if (err2) return res.status(500).json(err2);
+          const catIds = catRows.map(c => c.id);
+          if (!catIds.length) return res.json({ products: [], total: 0 });
 
-        const catIds = catRows.map(c => c.id);
-        if (!catIds.length) return res.json({ products: [], total: 0 });
-
-        const productSql = `
-        SELECT
-          p.id,
-          p.title,
-          p.slug,
-          p.price,
-          p.sell_price,
-          p.stock,
-          p.product_type,
-          p.main_image,
-          MAX(e.price)        AS ebook_price,
-          MAX(e.sell_price)   AS ebook_sell_price,
-          COALESCE(ROUND(AVG(r.rating), 1), 0) AS rating
-        FROM products p
-        JOIN product_categories pc ON pc.product_id = p.id
-        LEFT JOIN ebooks e ON e.product_id = p.id
-        LEFT JOIN product_authors pa ON pa.product_id = p.id
-        LEFT JOIN reviews r
-          ON r.product_id = p.id AND r.status = 'approved'
-        WHERE pc.category_id IN (?)
-          AND p.status = 'published'
-          AND p.sell_price BETWEEN ? AND ?
-          AND p.title LIKE ?
-          AND (? = '' OR pa.author_id = ?)
-        GROUP BY p.id
-        HAVING rating >= ?
-        ORDER BY ${orderBy}
-        LIMIT ? OFFSET ?
-        `;
-
-        const countSql = `
-          SELECT COUNT(*) AS total FROM (
-            SELECT p.id
+          const productSql = `
+            SELECT
+              p.id,
+              p.title,
+              p.slug,
+              p.price,
+              p.sell_price,
+              p.stock,
+              p.product_type,
+              p.main_image,
+              MAX(e.price)      AS ebook_price,
+              MAX(e.sell_price) AS ebook_sell_price,
+              COALESCE(ROUND(AVG(r.rating), 1), 0) AS rating
             FROM products p
             JOIN product_categories pc ON pc.product_id = p.id
+            LEFT JOIN ebooks e ON e.product_id = p.id
             LEFT JOIN product_authors pa ON pa.product_id = p.id
-            LEFT JOIN reviews r
-              ON r.product_id = p.id AND r.status = 'approved'
+            LEFT JOIN product_subjects ps_filter ON ps_filter.product_id = p.id
+            LEFT JOIN reviews r ON r.product_id = p.id AND r.status = 'approved'
             WHERE pc.category_id IN (?)
               AND p.status = 'published'
               AND p.sell_price BETWEEN ? AND ?
               AND p.title LIKE ?
               AND (? = '' OR pa.author_id = ?)
+              AND (? = '' OR ps_filter.subject_id = ?)
             GROUP BY p.id
-            HAVING COALESCE(ROUND(AVG(r.rating), 1), 0) >= ?
-          ) t
-        `;
+            HAVING rating >= ?
+            ORDER BY ${orderBy}
+            LIMIT ? OFFSET ?
+          `;
 
-        const commonParams = [
-          catIds, min, max, `%${search}%`, author, author, rating
-        ];
+          const countSql = `
+            SELECT COUNT(*) AS total FROM (
+              SELECT p.id
+              FROM products p
+              JOIN product_categories pc ON pc.product_id = p.id
+              LEFT JOIN product_authors pa ON pa.product_id = p.id
+              LEFT JOIN product_subjects ps_filter ON ps_filter.product_id = p.id
+              LEFT JOIN reviews r ON r.product_id = p.id AND r.status = 'approved'
+              WHERE pc.category_id IN (?)
+                AND p.status = 'published'
+                AND p.sell_price BETWEEN ? AND ?
+                AND p.title LIKE ?
+                AND (? = '' OR pa.author_id = ?)
+                AND (? = '' OR ps_filter.subject_id = ?)
+              GROUP BY p.id
+              HAVING COALESCE(ROUND(AVG(r.rating), 1), 0) >= ?
+            ) t
+          `;
 
-        db.query(
-          productSql,
-          [...commonParams, Number(limit), Number(offset)],
-          (err3, products) => {
-            if (err3) return res.status(500).json(err3);
+          const commonParams = [
+            catIds, min, max, `%${search}%`,
+            author, author,
+            subject, subject,
+            rating,
+          ];
 
-            db.query(countSql, commonParams, (err4, count) => {
-              if (err4) return res.status(500).json(err4);
+          db.query(
+            productSql,
+            [...commonParams, Number(limit), Number(offset)],
+            (err3, products) => {
+              if (err3) return res.status(500).json(err3);
 
-              res.json({
-                products,
-                total: count[0].total,
+              db.query(countSql, commonParams, (err4, count) => {
+                if (err4) return res.status(500).json(err4);
+
+                res.json({
+                  products,
+                  total: count[0].total,
+                });
               });
-            });
-          }
-        );
-      });
+            }
+          );
+        }
+      );
     }
   );
 });
@@ -387,6 +384,59 @@ router.get("/:slug/authors", (req, res) => {
               AND p.status = 'published'
               AND a.name LIKE ?
             GROUP BY a.id
+            ORDER BY product_count DESC
+          `;
+
+          db.query(sql, [catIds, `%${search}%`], (err3, rows) => {
+            if (err3) return res.status(500).json(err3);
+            res.json(rows);
+          });
+        }
+      );
+    }
+  );
+});
+
+
+/* ======================================================
+   GET SUBJECTS FOR CATEGORY — agph only, includes children
+   GET /api/viewcategory/:slug/subjects?search=
+====================================================== */
+router.get("/:slug/subjects", (req, res) => {
+  const { slug } = req.params;
+  const { search = "" } = req.query;
+
+  db.query(
+    `SELECT id FROM categories WHERE slug = ? AND imprint = 'agph' LIMIT 1`,
+    [slug],
+    (err, cats) => {
+      if (err) return res.status(500).json(err);
+      if (!cats.length) return res.json([]);
+
+      const catId = cats[0].id;
+
+      db.query(
+        `SELECT id FROM categories WHERE imprint = 'agph' AND (id = ? OR parent_id = ?)`,
+        [catId, catId],
+        (err2, catRows) => {
+          if (err2) return res.status(500).json(err2);
+          const catIds = catRows.map(c => c.id);
+
+          const sql = `
+            SELECT
+              s.id,
+              s.name,
+              s.slug,
+              COUNT(DISTINCT p.id) AS product_count
+            FROM subjects s
+            JOIN product_subjects ps ON ps.subject_id = s.id
+            JOIN products p ON p.id = ps.product_id
+            JOIN product_categories pc ON pc.product_id = p.id
+            WHERE pc.category_id IN (?)
+              AND p.status = 'published'
+              AND s.status = 'active'
+              AND s.name LIKE ?
+            GROUP BY s.id
             ORDER BY product_count DESC
           `;
 
