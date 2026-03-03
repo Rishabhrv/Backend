@@ -189,26 +189,54 @@ router.get("/continue", auth, (req, res) => {
 
 
 router.post("/:slug/bookmark", auth, (req, res) => {
-  const { cfi, label } = req.body;
+  const { cfi, label, note } = req.body;
+  const user_id = req.user.id;
+  const { slug } = req.params;
 
-  const sql = `
-    INSERT INTO ebook_bookmarks (user_id, ebook_id, cfi, label)
-    SELECT ?, e.id, ?, ?
+  // First get ebook_id safely
+  const findSql = `
+    SELECT e.id
     FROM ebooks e
     JOIN products p ON p.id = e.product_id
     WHERE p.slug = ?
+    LIMIT 1
   `;
 
-  db.query(sql, [req.user.id, cfi, label, req.params.slug], err => {
-    if (err) return res.status(500).json({ msg: "Failed" });
-    res.json({ success: true });
+  db.query(findSql, [slug], (err, rows) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ msg: "DB error" });
+    }
+
+    if (!rows.length) {
+      return res.status(404).json({ msg: "Ebook not found" });
+    }
+
+    const ebook_id = rows[0].id;
+
+    const insertSql = `
+      INSERT INTO ebook_bookmarks (user_id, ebook_id, cfi, label, note)
+      VALUES (?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        label = VALUES(label),
+        note = VALUES(note)
+    `;
+
+    db.query(insertSql, [user_id, ebook_id, cfi, label, note], (err2) => {
+      if (err2) {
+        console.error(err2);
+        return res.status(500).json({ msg: "Bookmark failed" });
+      }
+
+      res.json({ success: true });
+    });
   });
 });
 
 
 router.get("/:slug/bookmarks", auth, (req, res) => {
   const sql = `
-    SELECT eb.id, eb.cfi, eb.label
+    SELECT eb.id, eb.cfi, eb.label, eb.note
     FROM ebook_bookmarks eb
     JOIN ebooks e ON e.id = eb.ebook_id
     JOIN products p ON p.id = e.product_id
