@@ -227,23 +227,29 @@ function is_excluded(text)
   return false
 end
 
+local first_h1_seen = false
+
 function Header(elem)
   if elem.level == 1 then
     local text = pandoc.utils.stringify(elem)
-    
+
+    -- Skip the very first H1 (it's the book title, not a chapter)
+    if not first_h1_seen then
+      first_h1_seen = true
+      return elem
+    end
+
     -- Skip if already has "Chapter" or is in excluded list
     if text:match("^[Cc][Hh][Aa][Pp][Tt][Ee][Rr]") or is_excluded(text) then
       return elem
     end
-    
-    -- Add chapter number for regular chapters
+
     chapter_count = chapter_count + 1
     h2_count = 0
     h3_count = 0
-    
+
     local prefix = pandoc.Str("Chapter " .. chapter_count .. ": ")
     table.insert(elem.content, 1, prefix)
-    
     return elem
     
   elseif elem.level == 2 then
@@ -297,23 +303,24 @@ end
     return callback(new Error("Input file not found"));
   }
 
-  const toEpub = spawn(pandocPath, [
+
+// In convertDocxToEpub(), replace the spawn args:
+
+const toEpub = spawn(pandocPath, [
     originalPath,
     "-o",
     epubPath,
-    "--toc",
-    "--toc-depth=1",
     "--split-level=1",
-    `--metadata=title:${title}`,
     "--metadata=lang:en",
     "--standalone",
+    "--epub-title-page=false",       // ← was "none", must be true/false
     `--extract-media=${mediaDir}`,
     "--preserve-tabs",
     `--lua-filter=${luaFilterPath}`,
     `--css=${cssPath}`,
     "--from=docx+styles",
     "--mathml"
-  ]);
+]);
 
   let stderrOutput = "";
 
@@ -615,8 +622,10 @@ SELECT
   p.price,
   p.sell_price,
   p.status,
+  p.product_type,
   p.created_at AS date,
   GROUP_CONCAT(DISTINCT c.name) AS categories,
+  GROUP_CONCAT(DISTINCT c.imprint) AS imprints,
   MAX(sm.meta_title) AS meta_title,
   MAX(sm.meta_description) AS meta_description,
   MAX(sm.keywords) AS keywords
@@ -635,6 +644,7 @@ GROUP BY
   p.price,
   p.sell_price,
   p.status,
+  p.product_type,
   p.created_at
 ORDER BY p.created_at DESC
   `;
@@ -652,6 +662,7 @@ ORDER BY p.created_at DESC
       meta_description: p.meta_description || "",
       keywords: p.keywords || "",
       description: p.description || "",
+      imprints: p.imprints ? p.imprints.split(",") : [],
     }));
 
     res.json(formatted);

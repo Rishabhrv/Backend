@@ -223,14 +223,23 @@ router.get("/orders", adminAuth, (req, res) => {
   db.query(
     `SELECT o.id, o.total_amount, o.status, o.payment_status, o.created_at,
             u.name AS user_name,
-            s.courier, s.tracking_number, s.status AS shipping_status
+            s.courier, s.tracking_number, s.status AS shipping_status,
+            GROUP_CONCAT(DISTINCT c.imprint) AS imprints
      FROM orders o
-     LEFT JOIN users    u ON u.id = o.user_id
-     LEFT JOIN shipping s ON s.order_id = o.id
+     LEFT JOIN users        u  ON u.id  = o.user_id
+     LEFT JOIN shipping     s  ON s.order_id = o.id
+     LEFT JOIN order_items  oi ON oi.order_id = o.id
+     LEFT JOIN products     p  ON p.id  = oi.product_id
+     LEFT JOIN product_categories pc ON pc.product_id = p.id
+     LEFT JOIN categories   c  ON c.id  = pc.category_id
+     GROUP BY o.id, u.name, s.courier, s.tracking_number, s.status
      ORDER BY o.created_at DESC`,
     (err, rows) => {
       if (err) return res.status(500).json({ msg: "DB error" });
-      res.json(rows);
+      res.json(rows.map(r => ({
+        ...r,
+        imprints: r.imprints ? r.imprints.split(",") : [],
+      })));
     }
   );
 });

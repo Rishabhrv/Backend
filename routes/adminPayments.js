@@ -38,10 +38,18 @@ router.get("/payments", adminAuth, (req, res) => {
       o.payment_status               AS status,
       o.created_at,
       u.name,
-      u.email
+      u.email,
+      GROUP_CONCAT(DISTINCT c.imprint) AS imprints
     FROM orders o
     JOIN users u ON u.id = o.user_id
+    LEFT JOIN order_items oi         ON oi.order_id   = o.id
+    LEFT JOIN products p             ON p.id           = oi.product_id
+    LEFT JOIN product_categories pc  ON pc.product_id  = p.id
+    LEFT JOIN categories c           ON c.id           = pc.category_id
     WHERE o.payment_status = 'success'
+    GROUP BY o.id, o.user_id, o.razorpay_payment_id,
+             o.total_amount, o.payment_status, o.created_at,
+             u.name, u.email
 
     UNION ALL
 
@@ -54,7 +62,8 @@ router.get("/payments", adminAuth, (req, res) => {
       sp.status,
       sp.created_at,
       u.name,
-      u.email
+      u.email,
+      NULL                           AS imprints
     FROM subscription_payments sp
     JOIN user_subscriptions us ON us.id = sp.user_subscription_id
     JOIN users u ON u.id = us.user_id
@@ -65,7 +74,10 @@ router.get("/payments", adminAuth, (req, res) => {
 
   db.query(sql, (err, rows) => {
     if (err) return res.status(500).json(err);
-    res.json(rows);
+    res.json(rows.map(r => ({
+      ...r,
+      imprints: r.imprints ? r.imprints.split(",") : [],
+    })));
   });
 });
 
