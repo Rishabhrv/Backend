@@ -427,7 +427,7 @@ router.post(
 
     const imagePath = req.files.image
       ? `/uploads/products/${req.files.image[0].filename}`
-      : null;
+      : (req.body.image_url || null);
 
     const slug = generateSlug(title); // ✅ your Hindi-safe slug
 
@@ -475,6 +475,18 @@ router.post(
             });
           }
 
+          /* ---------- SYNC ISBN TO PRODUCTS TABLE ---------- */
+if (req.body.attributes) {
+  const attributes = JSON.parse(req.body.attributes);
+  const isbnAttr = attributes.find((a) => a.name?.toLowerCase() === "isbn");
+  if (isbnAttr?.values?.trim()) {
+    db.query(
+      `UPDATE products SET isbn = ? WHERE id = ?`,
+      [isbnAttr.values.trim(), productId]
+    );
+  }
+}
+
           /* ---------- SAVE PRODUCT CATEGORIES ---------- */
           if (req.body.categories) {
             const categories = JSON.parse(req.body.categories);
@@ -492,6 +504,17 @@ router.post(
               db.query(
                 `INSERT INTO product_gallery (product_id, image_path, sort_order) VALUES (?, ?, ?)`,
                 [productId, `/uploads/gallery/${file.filename}`, index]
+              );
+            });
+          }
+
+          /* ---------- PRODUCT GALLERY (URL-based, add mode) ---------- */
+          if (req.body.galleryUrls) {
+            const galleryUrls = JSON.parse(req.body.galleryUrls);
+            galleryUrls.forEach((urlPath, index) => {
+              db.query(
+                `INSERT INTO product_gallery (product_id, image_path, sort_order) VALUES (?, ?, ?)`,
+                [productId, urlPath, index]
               );
             });
           }
@@ -1035,8 +1058,19 @@ router.put(
       ? [title, slug, description, price, sell_price, stock, sku, product_type, status, imagePath, id]
       : [title, slug, description, price, sell_price, stock, sku, product_type, status, id];
 
-    db.query(updateSql, params, (err) => {
-      if (err) return res.status(500).json(err);
+// ── CHECK STOCK BEFORE UPDATING ──────────────────────────────────
+db.query(`SELECT stock FROM products WHERE id = ?`, [id], (err, stockRows) => {
+  const wasOutOfStock = !err && stockRows.length && Number(stockRows[0].stock) === 0;
+
+  db.query(updateSql, params, (err) => {
+    if (err) return res.status(500).json(err);
+
+    // ── TRIGGER STOCK NOTIFICATIONS IF RESTOCKED ─────────────────
+    if (wasOutOfStock && stock && parseInt(stock) > 0) {
+      fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/stock-notifications/notify/${id}`, {
+        method: "POST",
+      }).catch((e) => console.error("Notify trigger failed:", e.message));
+    }
 
       /* ---------------- SHIPPING ---------------- */
       db.query(`DELETE FROM shipping_details WHERE product_id = ?`, [id], () => {
@@ -1080,34 +1114,42 @@ router.put(
       });
 
       /* ---------------- ATTRIBUTES ---------------- */
-      db.query(`DELETE FROM product_attributes WHERE product_id = ?`, [id], () => {
-        if (attributes) {
-          JSON.parse(attributes).forEach((attr) => {
-            if (!attr.name || !attr.values) return;
-
-            db.query(
-              `INSERT IGNORE INTO attributes (name) VALUES (?)`,
-              [attr.name],
-              () => {
-                db.query(
-                  `SELECT id FROM attributes WHERE name = ?`,
-                  [attr.name],
-                  (err, rows) => {
-                    if (!rows?.length) return;
-
-                    db.query(
-                      `INSERT INTO product_attributes
-                      (product_id, attribute_id, value)
-                      VALUES (?, ?, ?)`,
-                      [id, rows[0].id, attr.values]
-                    );
-                  }
-                );
-              }
-            );
-          });
+/* ---------------- ATTRIBUTES ---------------- */
+db.query(`DELETE FROM product_attributes WHERE product_id = ?`, [id], () => {
+  if (attributes) {
+    JSON.parse(attributes).forEach((attr) => {
+      if (!attr.name || !attr.values) return;
+      db.query(
+        `INSERT IGNORE INTO attributes (name) VALUES (?)`,
+        [attr.name],
+        () => {
+          db.query(
+            `SELECT id FROM attributes WHERE name = ?`,
+            [attr.name],
+            (err, rows) => {
+              if (!rows?.length) return;
+              db.query(
+                `INSERT INTO product_attributes
+                (product_id, attribute_id, value)
+                VALUES (?, ?, ?)`,
+                [id, rows[0].id, attr.values]
+              );
+            }
+          );
         }
-      });
+      );
+    });
+
+    /* ---------- SYNC ISBN TO PRODUCTS TABLE ---------- */
+    const parsedAttrs = JSON.parse(attributes);
+    const isbnAttr = parsedAttrs.find((a) => a.name?.toLowerCase() === "isbn");
+    if (isbnAttr?.values?.trim()) {
+      db.query(`UPDATE products SET isbn = ? WHERE id = ?`, [isbnAttr.values.trim(), id]);
+    } else {
+      db.query(`UPDATE products SET isbn = NULL WHERE id = ?`, [id]);
+    }
+  }
+});
 
       /* ---------------- AUTHORS ---------------- */
       db.query(`DELETE FROM product_authors WHERE product_id = ?`, [id], () => {
@@ -1294,7 +1336,7 @@ if (req.files?.gallery) {
   }
 );
 
-
+});
 
 // =============Delete=============
 
