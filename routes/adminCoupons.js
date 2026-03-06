@@ -24,13 +24,10 @@ function adminAuth(req, res, next) {
 
 /* ================= GET ALL COUPONS ================= */
 router.get("/coupons", adminAuth, (req, res) => {
-  db.query(
-    `SELECT * FROM coupons ORDER BY created_at DESC`,
-    (err, rows) => {
-      if (err) return res.status(500).json(err);
-      res.json(rows);
-    }
-  );
+  db.query(`SELECT * FROM coupons ORDER BY created_at DESC`, (err, rows) => {
+    if (err) return res.status(500).json(err);
+    res.json(rows);
+  });
 });
 
 /* ================= CREATE COUPON ================= */

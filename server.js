@@ -42,8 +42,10 @@ app.use("/api/admin", require("./routes/adminReviews"));
 app.use("/api/admin", require("./routes/users"));
 app.use("/api/admin", require("./routes/adminOrders"));
 app.use("/api/admin", require("./routes/adminSubscriptions"));
-app.use("/api/admin", require("./routes/adminPayments"));
 app.use("/api/admin", require("./routes/adminCoupons"));
+
+app.use("/api/admin", require("./routes/adminPayments"));
+
 app.use("/api/subjects", require("./routes/subjects"));
 
 
@@ -56,6 +58,7 @@ app.use('/api/invoice', require('./routes/invoice'));
 // ADMIN SECTION
 app.use("/api/shipping", require("./routes/shipping"));
 
+app.use("/api/stock-notifications", require("./routes/stockNotifications"));
 
 app.use("/api/ag-classics", require("./routes/agclassic"));
 
