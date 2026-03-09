@@ -198,4 +198,28 @@ router.get("/latest", (req, res) => {
 });
 
 
+/* ================= GET RATING SUMMARY ================= */
+router.get("/product/:productId/summary", (req, res) => {
+  const { productId } = req.params;
+
+  const sql = `
+    SELECT 
+      ROUND(AVG(rating), 1) AS average,
+      COUNT(*) AS total
+    FROM reviews
+    WHERE product_id = ?
+      AND status = 'approved'
+  `;
+
+  db.query(sql, [productId], (err, result) => {
+    if (err) return res.status(500).json({ average: 0, total: 0 });
+
+    const row = result[0];
+    res.json({
+      average: parseFloat(row.average) || 0,
+      total: row.total || 0,
+    });
+  });
+});
+
 module.exports = router;
