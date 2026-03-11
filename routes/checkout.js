@@ -93,10 +93,10 @@ router.post("/create", auth, (req, res) => {
       FROM cart c
       JOIN products p ON p.id = c.product_id
       LEFT JOIN ebooks e ON e.product_id = p.id
-      INNER JOIN product_categories pc ON pc.product_id = p.id
-      INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
+      JOIN product_categories pc ON pc.product_id = p.id
+      JOIN categories cat ON cat.id = pc.category_id
       WHERE c.user_id = ?
-      GROUP BY c.id
+      AND cat.imprint = 'agph'
     `;
 
   db.query(cartSql, [user_id], (err, items) => {
@@ -139,7 +139,7 @@ router.post("/create", auth, (req, res) => {
             i.format === "ebook" ? 1 : i.quantity
           ]);
 
-db.query(
+          db.query(
             `INSERT INTO order_items 
              (order_id, product_id, format, price, quantity) 
              VALUES ?`,
