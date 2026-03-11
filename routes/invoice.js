@@ -141,10 +141,10 @@ router.get("/:orderId/invoice", auth, (req, res) => {
 
     /* Company name */
     doc.font("Helvetica-Bold").fontSize(20).fillColor(C_DARK)
-       .text("AGPH Books", ML, y);
+       .text("AGPH Books Store", ML, y);
 
     doc.font("Helvetica").fontSize(8).fillColor(C_MUTED)
-       .text("www.agphbooks.com  ·  editor@agphbooks.com", ML, y + 24);
+       .text("www.store.agphbooks.com  ·  editor@agphbooks.com", ML, y + 24);
 
     /* Invoice badge – top right */
     const bdgW = 110, bdgH = 30;
@@ -337,7 +337,7 @@ router.get("/:orderId/invoice", auth, (req, res) => {
     y += 10;
     doc.font("Helvetica").fontSize(8).fillColor(C_MUTED)
        .text(
-         "Thank you for shopping with AGPH Books. For any queries, reach us at editor@agphbooks.com",
+         "Thank you for shopping with AGPH Books Store. For any queries, reach us at editor@agphbooks.com",
          ML, y, { width: CW }
        );
 
@@ -347,7 +347,7 @@ router.get("/:orderId/invoice", auth, (req, res) => {
     doc.rect(0, PH - 30, PW, 30).fill(C_DARK);
     doc.font("Helvetica").fontSize(7.5).fillColor("#9CA3AF")
        .text(
-         "AGPH Books  ·  Computer-generated invoice  ·  No signature required",
+         "AGPH Books Store  ·  Computer-generated invoice  ·  No signature required",
          0, PH - 18,
          { width: PW, align: "center" }
        );

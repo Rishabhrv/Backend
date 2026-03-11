@@ -174,7 +174,7 @@ function shippingEmailTemplate(unifiedStatus, customer, order, tracking, courier
         style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
         <tr>
           <td style="background:${cfg.color};padding:24px 32px;">
-            <p style="margin:0;color:#fff;font-size:20px;font-weight:700;">AGPH Books</p>
+            <p style="margin:0;color:#fff;font-size:20px;font-weight:700;">AGPH Books Store</p>
             <p style="margin:4px 0 0;color:rgba(255,255,255,0.75);font-size:12px;">Order #${order.id}</p>
           </td>
         </tr>
@@ -191,7 +191,7 @@ function shippingEmailTemplate(unifiedStatus, customer, order, tracking, courier
         </tr>
         <tr>
           <td style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;text-align:center;">
-            <p style="margin:0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} AGPH Books. All rights reserved.</p>
+            <p style="margin:0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} AGPH Books Store. All rights reserved.</p>
           </td>
         </tr>
       </table>
@@ -398,7 +398,7 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
               if (template && customer.email) {
                 try {
                   await transporter.sendMail({
-                    from:    `"AGPH Books" <${process.env.MAIL_USER}>`,
+                    from:    `"AGPH Books Store" <${process.env.MAIL_USER}>`,
                     to:      customer.email,
                     subject: template.subject,
                     html:    template.html,

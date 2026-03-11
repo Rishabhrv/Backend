@@ -146,36 +146,73 @@ router.get("/coupons/:id", adminAuth, (req, res) => {
 /* ================= UPDATE COUPON ================= */
 router.put("/coupons/:id", adminAuth, (req, res) => {
   const { id } = req.params;
+
   const {
     selected_products = [],
     selected_categories = [],
     ...couponData
   } = req.body;
 
-  db.query(`UPDATE coupons SET ? WHERE id = ?`, [couponData, id], (err) => {
-    if (err) return res.status(500).json(err);
+  const updateSql = `
+    UPDATE coupons SET
+    code = ?,
+    discount_type = ?,
+    discount_value = ?,
+    min_cart_value = ?,
+    max_discount = ?,
+    applicable_on = ?,
+    product_type = ?,
+    start_date = ?,
+    expiry_date = ?,
+    usage_limit = ?,
+    usage_per_user = ?,
+    status = ?
+    WHERE id = ?
+  `;
 
-    /* RESET OLD MAPPINGS */
-    db.query(`DELETE FROM coupon_products WHERE coupon_id = ?`, [id]);
-    db.query(`DELETE FROM coupon_categories WHERE coupon_id = ?`, [id]);
+  db.query(
+    updateSql,
+    [
+      couponData.code,
+      couponData.discount_type,
+      couponData.discount_value,
+      couponData.min_cart_value || 0,
+      couponData.max_discount || null,
+      couponData.applicable_on || "all",
+      couponData.product_type || "all",
+      couponData.start_date,
+      couponData.expiry_date,
+      couponData.usage_limit || null,
+      couponData.usage_per_user || 1,
+      couponData.status || "active",
+      id
+    ],
+    (err) => {
+      if (err) return res.status(500).json(err);
 
-    /* INSERT NEW MAPPINGS */
-    selected_products.forEach(pid => {
-      db.query(
-        `INSERT INTO coupon_products (coupon_id, product_id) VALUES (?,?)`,
-        [id, pid]
-      );
-    });
+      db.query(`DELETE FROM coupon_products WHERE coupon_id = ?`, [id], () => {
+        db.query(`DELETE FROM coupon_categories WHERE coupon_id = ?`, [id], () => {
 
-    selected_categories.forEach(cid => {
-      db.query(
-        `INSERT INTO coupon_categories (coupon_id, category_id) VALUES (?,?)`,
-        [id, cid]
-      );
-    });
+          selected_products.forEach(pid => {
+            db.query(
+              `INSERT INTO coupon_products (coupon_id, product_id) VALUES (?,?)`,
+              [id, pid]
+            );
+          });
 
-    res.json({ msg: "Coupon updated successfully" });
-  });
+          selected_categories.forEach(cid => {
+            db.query(
+              `INSERT INTO coupon_categories (coupon_id, category_id) VALUES (?,?)`,
+              [id, cid]
+            );
+          });
+
+          res.json({ msg: "Coupon updated successfully" });
+
+        });
+      });
+    }
+  );
 });
 
 

@@ -87,7 +87,7 @@ async function sendOrderConfirmedEmail(orderId) {
     if (!template || !customer.email) return;
 
     await transporter.sendMail({
-      from:    `"AGPH Books" <${process.env.MAIL_USER}>`,
+      from:    `"AGPH Books Store" <${process.env.MAIL_USER}>`,
       to:      customer.email,
       subject: template.subject,
       html:    template.html,
