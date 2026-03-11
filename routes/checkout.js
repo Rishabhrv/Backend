@@ -277,11 +277,11 @@ router.post("/shipping-cost", auth, (req, res) => {
         sd.weight
       FROM cart c
       JOIN shipping_details sd ON sd.product_id = c.product_id
-      INNER JOIN product_categories pc ON pc.product_id = c.product_id
-      INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
+      JOIN product_categories pc ON pc.product_id = c.product_id
+      JOIN categories cat ON cat.id = pc.category_id
       WHERE c.user_id = ?
       AND c.format = 'paperback'
-      GROUP BY c.id
+      AND cat.imprint = 'agph'
     `;
 
   db.query(cartSql, [userId], (err, items) => {
