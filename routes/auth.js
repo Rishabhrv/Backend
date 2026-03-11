@@ -67,9 +67,9 @@ router.post("/send-register-otp", async (req, res) => {
 
     try {
       await transporter.sendMail({
-        from:    `"AGPH Books" <${process.env.MAIL_USER}>`,
+        from:    `"AGPH Books Store" <${process.env.MAIL_USER}>`,
         to:      email,
-        subject: "Verify your email — AGPH Books",
+        subject: "Verify your email — AGPH Books Store",
         html: `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"></head>
@@ -81,7 +81,7 @@ router.post("/send-register-otp", async (req, res) => {
         <!-- Header -->
         <tr>
           <td style="background:#111827;padding:28px 32px;">
-            <p style="margin:0;color:#fff;font-size:20px;font-weight:700;">AGPH Books</p>
+            <p style="margin:0;color:#fff;font-size:20px;font-weight:700;">AGPH Books Store</p>
             <p style="margin:4px 0 0;color:rgba(255,255,255,0.55);font-size:12px;">Email Verification</p>
           </td>
         </tr>
@@ -101,14 +101,14 @@ router.post("/send-register-otp", async (req, res) => {
             </div>
 
             <p style="margin:0;font-size:13px;color:#9ca3af;">
-              If you didn't create an account with AGPH Books, you can safely ignore this email.
+              If you didn't create an account with AGPH Books Store, you can safely ignore this email.
             </p>
           </td>
         </tr>
         <!-- Footer -->
         <tr>
           <td style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;text-align:center;">
-            <p style="margin:0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} AGPH Books. All rights reserved.</p>
+            <p style="margin:0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} AGPH Books Store. All rights reserved.</p>
           </td>
         </tr>
       </table>

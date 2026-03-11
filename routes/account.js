@@ -131,9 +131,9 @@ router.post("/send-email-otp", auth, async (req, res) => {
 
       try {
         await transporter.sendMail({
-          from:    `"AGPH Books" <${process.env.MAIL_USER}>`,
+          from:    `"AGPH Books Store" <${process.env.MAIL_USER}>`,
           to:      newEmail,
-          subject: "Verify your new email — AGPH Books",
+          subject: "Verify your new email — AGPH Books Store",
           html: `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"></head>
@@ -144,7 +144,7 @@ router.post("/send-email-otp", auth, async (req, res) => {
         style="max-width:480px;width:100%;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
         <tr>
           <td style="background:#111827;padding:28px 32px;">
-            <p style="margin:0;color:#fff;font-size:20px;font-weight:700;">AGPH Books</p>
+            <p style="margin:0;color:#fff;font-size:20px;font-weight:700;">AGPH Books Store</p>
             <p style="margin:4px 0 0;color:rgba(255,255,255,0.55);font-size:12px;">Email Change Verification</p>
           </td>
         </tr>
@@ -166,7 +166,7 @@ router.post("/send-email-otp", auth, async (req, res) => {
         </tr>
         <tr>
           <td style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;text-align:center;">
-            <p style="margin:0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} AGPH Books. All rights reserved.</p>
+            <p style="margin:0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} AGPH Books Store. All rights reserved.</p>
           </td>
         </tr>
       </table>
