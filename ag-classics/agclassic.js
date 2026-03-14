@@ -4,15 +4,15 @@ const db = require("../db");
 
 /*
   GET /api/ag-classics
-  Lists all products whose category  AND imprint = 'agclassics'
+  Lists all products whose category AND imprint = 'agclassics'
 */
 router.get("/", async (req, res) => {
   try {
     const { format, sort = "newest", page = 1, limit = 24 } = req.query;
 
-    const pageNum   = Math.max(1, parseInt(page)  || 1);
-    const limitNum  = Math.min(48, Math.max(1, parseInt(limit) || 24));
-    const offset    = (pageNum - 1) * limitNum;
+    const pageNum  = Math.max(1, parseInt(page)  || 1);
+    const limitNum = Math.min(48, Math.max(1, parseInt(limit) || 24));
+    const offset   = (pageNum - 1) * limitNum;
 
     const sortMap = {
       newest:     "p.created_at DESC",
@@ -25,57 +25,59 @@ router.get("/", async (req, res) => {
     if (format === "ebook")    formatClause = "AND p.product_type IN ('ebook','both')";
     else if (format === "physical") formatClause = "AND p.product_type IN ('physical','both')";
 
-    // ── imprint guard: only show products in AG Classics category ──
-    const imprintClause = "AND c.imprint = 'agclassics'";
+    const dataQuery = `
+      SELECT
+        p.id,
+        p.title,
+        p.slug,
+        p.sku,
+        p.price,
+        p.sell_price,
+        p.main_image,
+        p.stock,
+        p.product_type,
+        p.created_at,
 
-const dataQuery = `
-  SELECT
-    p.id,
-    p.title,
-    p.slug,
-    p.sku,
-    p.price,
-    p.sell_price,
-    p.main_image,
-    p.stock,
-    p.product_type,
-    p.created_at,
+        -- Ebook-specific pricing (lowest sell_price across pdf/epub variants)
+        MIN(e.price)      AS ebook_price,
+        MIN(e.sell_price) AS ebook_sell_price,
 
-    CONCAT('[', IFNULL(GROUP_CONCAT(
-      DISTINCT JSON_OBJECT('id', a.id, 'name', a.name, 'slug', a.slug)
-    ), ''), ']') AS authors,
+        CONCAT('[', IFNULL(GROUP_CONCAT(
+          DISTINCT JSON_OBJECT('id', a.id, 'name', a.name, 'slug', a.slug)
+        ), ''), ']') AS authors,
 
-    ROUND(AVG(r.rating), 1) AS avg_rating,
-    COUNT(DISTINCT r.id) AS review_count
+        ROUND(AVG(r.rating), 1) AS avg_rating,
+        COUNT(DISTINCT r.id)    AS review_count
 
-  FROM products p
-  JOIN product_categories pc ON p.id = pc.product_id
-  JOIN categories c
-    ON pc.category_id = c.id
-    AND c.imprint = 'agclassics'
+      FROM products p
+      JOIN product_categories pc ON p.id = pc.product_id
+      JOIN categories c
+        ON pc.category_id = c.id
+        AND c.imprint = 'agclassics'
 
-  LEFT JOIN product_authors pa ON p.id = pa.product_id
-  LEFT JOIN authors a ON pa.author_id = a.id
-  LEFT JOIN reviews r ON p.id = r.product_id AND r.status = 'approved'
+      LEFT JOIN ebooks e          ON e.product_id = p.id
+      LEFT JOIN product_authors pa ON p.id = pa.product_id
+      LEFT JOIN authors a         ON pa.author_id = a.id
+      LEFT JOIN reviews r         ON p.id = r.product_id AND r.status = 'approved'
 
-  WHERE p.status = 'published'
-  ${formatClause}
+      WHERE p.status = 'published'
+      ${formatClause}
 
-  GROUP BY p.id
-  ORDER BY ${orderBy}
-  LIMIT ? OFFSET ?
-`;
+      GROUP BY p.id
+      ORDER BY ${orderBy}
+      LIMIT ? OFFSET ?
+    `;
 
-const countQuery = `
-  SELECT COUNT(DISTINCT p.id) AS total
-  FROM products p
-  JOIN product_categories pc ON p.id = pc.product_id
-  JOIN categories c
-    ON pc.category_id = c.id
-    AND c.imprint = 'agclassics'
-  WHERE p.status = 'published'
-  ${formatClause}
-`;
+    const countQuery = `
+      SELECT COUNT(DISTINCT p.id) AS total
+      FROM products p
+      JOIN product_categories pc ON p.id = pc.product_id
+      JOIN categories c
+        ON pc.category_id = c.id
+        AND c.imprint = 'agclassics'
+      WHERE p.status = 'published'
+      ${formatClause}
+    `;
 
     const [[rows], [[{ total }]]] = await Promise.all([
       db.promise().query(dataQuery, [limitNum, offset]),
@@ -84,9 +86,12 @@ const countQuery = `
 
     const products = rows.map((row) => ({
       ...row,
-      authors:      row.authors      ? JSON.parse(row.authors)      : [],
-      avg_rating:   row.avg_rating   ? parseFloat(row.avg_rating)   : null,
-      review_count: row.review_count ? parseInt(row.review_count)   : 0,
+      authors:          row.authors          ? JSON.parse(row.authors) : [],
+      avg_rating:       row.avg_rating        ? parseFloat(row.avg_rating)   : null,
+      review_count:     row.review_count      ? parseInt(row.review_count)   : 0,
+      // ebook_price / ebook_sell_price are null when the product has no ebook entry
+      ebook_price:      row.ebook_price       ? parseFloat(row.ebook_price)      : null,
+      ebook_sell_price: row.ebook_sell_price  ? parseFloat(row.ebook_sell_price) : null,
     }));
 
     res.status(200).json({
@@ -143,7 +148,7 @@ router.get("/:slug", async (req, res) => {
           )
         ), ''), ']') AS gallery,
 
-        -- Ebook files (pdf / epub)
+        -- Ebook files with their individual prices
         CONCAT('[', IFNULL(GROUP_CONCAT(
           DISTINCT JSON_OBJECT(
             'id', e.id, 'file_type', e.file_type,
@@ -158,26 +163,22 @@ router.get("/:slug", async (req, res) => {
           )
         ), ''), ']') AS attributes,
 
-        ROUND(AVG(r.rating), 1)  AS avg_rating,
-        COUNT(DISTINCT r.id)     AS review_count
+        ROUND(AVG(r.rating), 1) AS avg_rating,
+        COUNT(DISTINCT r.id)    AS review_count
 
       FROM products p
       JOIN product_categories pc ON p.id = pc.product_id
       JOIN categories c
         ON pc.category_id = c.id
-        AND c.imprint    = 'agclassics'          -- ← imprint guard
+        AND c.imprint = 'agclassics'
 
-      LEFT JOIN product_authors pa2   ON p.id = pa2.product_id
-      LEFT JOIN authors a             ON pa2.author_id = a.id
-
-      LEFT JOIN product_gallery pg    ON p.id = pg.product_id
-
-      LEFT JOIN ebooks e              ON p.id = e.product_id
-
+      LEFT JOIN product_authors pa2  ON p.id = pa2.product_id
+      LEFT JOIN authors a            ON pa2.author_id = a.id
+      LEFT JOIN product_gallery pg   ON p.id = pg.product_id
+      LEFT JOIN ebooks e             ON p.id = e.product_id
       LEFT JOIN product_attributes pa ON p.id = pa.product_id
-      LEFT JOIN attributes attr       ON pa.attribute_id = attr.id
-
-      LEFT JOIN reviews r             ON p.id = r.product_id AND r.status = 'approved'
+      LEFT JOIN attributes attr      ON pa.attribute_id = attr.id
+      LEFT JOIN reviews r            ON p.id = r.product_id AND r.status = 'approved'
 
       WHERE p.slug   = ?
         AND p.status = 'published'
@@ -193,20 +194,21 @@ router.get("/:slug", async (req, res) => {
 
     const row = rows[0];
 
-    // Parse gallery and sort by sort_order
     let gallery = row.gallery ? JSON.parse(row.gallery) : [];
     gallery = gallery
       .filter((g) => g.image_path)
       .sort((a, b) => a.sort_order - b.sort_order);
 
+    const ebook_files = row.ebook_files ? JSON.parse(row.ebook_files) : [];
+
     res.status(200).json({
       success: true,
       product: {
         ...row,
-        authors:      row.authors      ? JSON.parse(row.authors)      : [],
+        authors:      row.authors    ? JSON.parse(row.authors) : [],
         gallery,
-        ebook_files:  row.ebook_files  ? JSON.parse(row.ebook_files)  : [],
-        attributes:   row.attributes   ? JSON.parse(row.attributes)   : [],
+        ebook_files,
+        attributes:   row.attributes ? JSON.parse(row.attributes) : [],
         avg_rating:   row.avg_rating   ? parseFloat(row.avg_rating)   : null,
         review_count: row.review_count ? parseInt(row.review_count)   : 0,
       },
