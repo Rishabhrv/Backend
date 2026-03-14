@@ -22,7 +22,7 @@ router.get("/", (req, res) => {
     JOIN categories cat ON cat.id = pc.category_id
     WHERE p.status = 'published'
       AND p.title LIKE ?
-      AND cat.imprint = 'agph'
+      AND cat.imprint = 'agclassics'
     ORDER BY p.created_at DESC
     LIMIT 5
   `;
@@ -39,7 +39,7 @@ router.get("/", (req, res) => {
     JOIN categories cat ON cat.id = pc.category_id
     WHERE a.status = 'active'
       AND a.name LIKE ?
-      AND cat.imprint = 'agph'
+      AND cat.imprint = 'agclassics'
     ORDER BY a.name ASC
     LIMIT 5
   `;

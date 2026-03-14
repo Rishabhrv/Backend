@@ -30,40 +30,36 @@ app.use("/api/orders", require("./routes/orders"));
 app.use("/api/my-books", require("./routes/myBooks"));
 app.use("/api/subscription-payment", require("./routes/subscriptionpayment"));
 app.use("/api/subscriptions", require("./routes/subscriptions"));
-
 app.use("/api/seo", require("./routes/seoroutes"));
-
 app.use("/api/admin", require("./routes/adminnotifications").router);
-
-
 app.use("/api/admin", require("./routes/adminEbooks"));
 app.use("/api/admin", require("./routes/adminReviews"));
-
 app.use("/api/admin", require("./routes/users"));
 app.use("/api/admin", require("./routes/adminOrders"));
 app.use("/api/admin", require("./routes/adminSubscriptions"));
 app.use("/api/admin", require("./routes/adminCoupons"));
-
 app.use("/api/admin", require("./routes/adminPayments"));
-
 app.use("/api/subjects", require("./routes/subjects"));
-
-
 app.use("/api/mylibrary", require("./routes/mylibrary"));
 app.use("/api/payment-history", require("./routes/payment-history"));
 app.use("/api/coupons", require("./routes/coupons"))
 app.use("/api/order-confirmed", require("./routes/order-confirmed"));
 app.use('/api/invoice', require('./routes/invoice'));
-
-// ADMIN SECTION
 app.use("/api/shipping", require("./routes/shipping"));
-
 app.use("/api/stock-notifications", require("./routes/stockNotifications"));
 
-app.use("/api/ag-classics", require("./routes/agclassic"));
-
-
-
+// AG Classics
+app.use("/api/ag-classics/orders", require("./ag-classics/orders"));
+app.use("/api/ag-classics/bestseller", require("./ag-classics/bestseller"));
+app.use("/api/ag-classics/products", require("./ag-classics/products"));
+app.use("/api/ag-classics/ebooks", require("./ag-classics/ebooks"));
+app.use("/api/ag-classics/viewcategory", require("./ag-classics/viewcategory")); 
+app.use("/api/ag-classics/search", require("./ag-classics/search"));
+app.use("/api/ag-classics/checkout", require("./ag-classics/checkout"));
+app.use("/api/ag-classics/coupons",  require("./ag-classics/checkout"));
+app.use("/api/ag-classics/cart", require("./ag-classics/cart"));
+app.use("/api/ag-classics/wishlist", require("./ag-classics/wishlist"));
+app.use("/api/ag-classics", require("./ag-classics/agclassic"));
 
 
 
