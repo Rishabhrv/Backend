@@ -8,24 +8,19 @@ const db = require("../db");
   Generic product listing endpoint, filterable by category slug.
 
   Query params:
-    category  – category slug (required for filtered results, e.g. "friction")
+    category  – category slug (required for filtered results)
     format    – "ebook" | "physical" (optional)
     sort      – "newest" | "price_asc" | "price_desc"  (default: newest)
     page      – page number (default: 1)
     limit     – results per page (default: 24, max: 48)
-
-  Usage examples:
-    /api/products?category=friction&limit=24
-    /api/products?category=ag-classics&sort=price_asc
-    /api/products?category=non-fiction&format=ebook
 */
 router.get("/", async (req, res) => {
   try {
     const {
       category,
       format,
-      sort = "newest",
-      page = 1,
+      sort  = "newest",
+      page  = 1,
       limit = 24,
     } = req.query;
 
@@ -46,7 +41,6 @@ router.get("/", async (req, res) => {
     else if (format === "physical") formatClause = "AND p.product_type IN ('physical','both')";
 
     /* ── Category filter (optional) ── */
-    // When a category slug is provided we JOIN on it; otherwise we return all.
     const categoryJoin = category
       ? `JOIN product_categories pc ON p.id = pc.product_id
          JOIN categories c ON pc.category_id = c.id AND c.slug = ?`
@@ -67,6 +61,11 @@ router.get("/", async (req, res) => {
         p.product_type,
         p.created_at,
 
+        -- Ebook-specific pricing (lowest across pdf/epub variants)
+        -- NULL when the product has no row in the ebooks table
+        MIN(e.price)      AS ebook_price,
+        MIN(e.sell_price) AS ebook_sell_price,
+
         CONCAT('[', IFNULL(GROUP_CONCAT(
           DISTINCT JSON_OBJECT('id', a.id, 'name', a.name, 'slug', a.slug)
         ), ''), ']') AS authors,
@@ -76,6 +75,7 @@ router.get("/", async (req, res) => {
 
       FROM products p
       ${categoryJoin}
+      LEFT JOIN ebooks e          ON e.product_id = p.id
       LEFT JOIN product_authors pa ON p.id = pa.product_id
       LEFT JOIN authors a          ON pa.author_id = a.id
       LEFT JOIN reviews r          ON p.id = r.product_id AND r.status = 'approved'
@@ -96,8 +96,8 @@ router.get("/", async (req, res) => {
       ${formatClause}
     `;
 
-    const queryParams     = [...categoryParam, limitNum, offset];
-    const countParams     = [...categoryParam];
+    const queryParams = [...categoryParam, limitNum, offset];
+    const countParams = [...categoryParam];
 
     const [[rows], [[{ total }]]] = await Promise.all([
       db.promise().query(dataQuery, queryParams),
@@ -106,9 +106,12 @@ router.get("/", async (req, res) => {
 
     const products = rows.map((row) => ({
       ...row,
-      authors:      row.authors      ? JSON.parse(row.authors)    : [],
-      avg_rating:   row.avg_rating   ? parseFloat(row.avg_rating) : null,
-      review_count: row.review_count ? parseInt(row.review_count) : 0,
+      authors:          row.authors          ? JSON.parse(row.authors)          : [],
+      avg_rating:       row.avg_rating        ? parseFloat(row.avg_rating)       : null,
+      review_count:     row.review_count      ? parseInt(row.review_count)       : 0,
+      // Ebook-specific prices — null when no ebooks row exists
+      ebook_price:      row.ebook_price       ? parseFloat(row.ebook_price)      : null,
+      ebook_sell_price: row.ebook_sell_price  ? parseFloat(row.ebook_sell_price) : null,
     }));
 
     res.status(200).json({
