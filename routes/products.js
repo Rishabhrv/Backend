@@ -632,6 +632,7 @@ if (req.body.attributes) {
 
 
 /* ================= GET PRODUCTS LIST ================= */
+/* ================= GET PRODUCTS LIST ================= */
 router.get("/", (req, res) => {
   const sql = `
 SELECT 
@@ -656,6 +657,7 @@ FROM products p
 LEFT JOIN product_categories pc ON pc.product_id = p.id
 LEFT JOIN categories c ON c.id = pc.category_id
 LEFT JOIN seo_meta sm ON sm.page_type = 'product' AND sm.page_id = p.id
+WHERE p.status = 'published'
 GROUP BY 
   p.id,
   p.title,
