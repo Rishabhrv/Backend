@@ -49,6 +49,7 @@ app.use("/api/shipping", require("./routes/shipping"));
 app.use("/api/stock-notifications", require("./routes/stockNotifications"));
 
 // AG Classics
+app.use("/api/ag-classics/my-books", require("./ag-classics/myBooks"));
 app.use("/api/ag-classics/orders", require("./ag-classics/orders"));
 app.use("/api/ag-classics/bestseller", require("./ag-classics/bestseller"));
 app.use("/api/ag-classics/products", require("./ag-classics/products"));

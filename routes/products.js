@@ -694,7 +694,66 @@ ORDER BY p.created_at DESC
   });
 });
 
+/* ================= GET PRODUCTS LIST ================= */
+router.get("/table-product", (req, res) => {
+  const sql = `
+SELECT 
+  p.id,
+  p.title AS name,
+  p.main_image AS image,
+  p.sku,
+  p.stock,
+  p.slug,
+  p.description,
+  p.price,
+  p.sell_price,
+  p.status,
+  p.product_type,
+  p.created_at AS date,
+  GROUP_CONCAT(DISTINCT c.name) AS categories,
+  GROUP_CONCAT(DISTINCT c.imprint) AS imprints,
+  MAX(sm.meta_title) AS meta_title,
+  MAX(sm.meta_description) AS meta_description,
+  MAX(sm.keywords) AS keywords
+FROM products p
+LEFT JOIN product_categories pc ON pc.product_id = p.id
+LEFT JOIN categories c ON c.id = pc.category_id
+LEFT JOIN seo_meta sm ON sm.page_type = 'product' AND sm.page_id = p.id
+GROUP BY 
+  p.id,
+  p.title,
+  p.main_image,
+  p.sku,
+  p.stock,
+  p.slug,
+  p.description,
+  p.price,
+  p.sell_price,
+  p.status,
+  p.product_type,
+  p.created_at
+ORDER BY p.created_at DESC
+  `;
 
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error("Product fetch error:", err);
+      return res.status(500).json({ message: "DB error" });
+    }
+
+    const formatted = results.map((p) => ({
+      ...p,
+      categories: p.categories ? p.categories.split(",") : [],
+      meta_title: p.meta_title || "",
+      meta_description: p.meta_description || "",
+      keywords: p.keywords || "",
+      description: p.description || "",
+      imprints: p.imprints ? p.imprints.split(",") : [],
+    }));
+
+    res.json(formatted);
+  });
+});
 
 /* ================= GET RANDOM FEATURED PRODUCT ================= */
 router.get("/random/featured", (req, res) => {
