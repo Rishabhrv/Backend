@@ -18,6 +18,30 @@ const auth = (req, res, next) => {
   });
 };
 
+/* ── Discounted pricing table ──────────────────────────────────
+   Mirrors the frontend exactly so Razorpay always receives the
+   correct discounted amount regardless of what the client sends.
+
+   Monthly plan  → lookup by number of months chosen:
+     1  month  = ₹399
+     2  months = ₹798
+     3  months = ₹999   (3-month deal, saves ₹198)
+     6  months = ₹2,394
+     12 months = ₹3,599 (annual deal, saves ₹1,189)
+
+   Quarterly plan → fixed ₹999
+   Yearly plan    → fixed ₹3,599
+──────────────────────────────────────────────────────────────── */
+const MONTHLY_PRICE = { 1: 399, 2: 798, 3: 999, 6: 2394, 12: 3599 };
+const PLAN_FIXED    = { quarterly: 999, yearly: 3599 };
+
+function calcAmount(plan, months, basePricePerMonth) {
+  if (plan === "monthly") {
+    return MONTHLY_PRICE[months] ?? basePricePerMonth * months;
+  }
+  return PLAN_FIXED[plan] ?? basePricePerMonth * months;
+}
+
 
 /* ==================================================
    USER SUBSCRIPTION DETAILS
@@ -128,13 +152,15 @@ router.post("/create", auth, (req, res) => {
             return res.status(400).json({ msg: "Invalid plan" });
           }
 
-          const plan_id = planRows[0].id;
-          const pricePerMonth = planRows[0].base_price;
-          const amount = pricePerMonth * months;
+          const plan_id        = planRows[0].id;
+          const basePricePerMonth = planRows[0].base_price;
+
+          /* ✅ Use the discount table — NOT base_price × months */
+          const amount = calcAmount(plan, Number(months), basePricePerMonth);
 
           const start = new Date();
-          const end = new Date();
-          end.setMonth(end.getMonth() + months);
+          const end   = new Date();
+          end.setMonth(end.getMonth() + Number(months));
 
           /* 3️⃣ CHECK EXISTING PENDING SUBSCRIPTION */
           db.query(
@@ -149,10 +175,23 @@ router.post("/create", auth, (req, res) => {
                 return res.status(500).json({ msg: "DB error" });
               }
 
-              /* ♻️ REUSE PENDING SUBSCRIPTION */
+              /* ♻️ REUSE PENDING SUBSCRIPTION — update amount in case
+                 the user switched plan/duration before paying */
               if (pendingRows.length > 0) {
+                const pendingId = pendingRows[0].id;
+
+                db.query(
+                  `UPDATE user_subscriptions
+                   SET plan_id=?, months=?, amount_paid=?, start_date=?, end_date=?
+                   WHERE id=?`,
+                  [plan_id, months, amount, start, end, pendingId],
+                  (err) => {
+                    if (err) console.error("Failed to update pending sub:", err);
+                  }
+                );
+
                 return res.json({
-                  subscription_id: pendingRows[0].id,
+                  subscription_id: pendingId,
                   amount,
                   reused: true,
                 });
@@ -251,7 +290,7 @@ router.post("/success", auth, (req, res) => {
                      status='active'`,
                     [user_id, subscription_id, rows[0].end_date],
                     () => {
-                      // 🔔 Notify admin of new subscription
+                      /* 🔔 NOTIFY ADMIN */
                       db.query(
                         `SELECT u.name, u.email, sp.title AS plan_title
                          FROM users u
@@ -260,8 +299,8 @@ router.post("/success", auth, (req, res) => {
                          WHERE u.id = ?`,
                         [subscription_id, user_id],
                         (err, infoRows) => {
-                          const name  = (!err && infoRows.length) ? infoRows[0].name       : "A user";
-                          const plan  = (!err && infoRows.length) ? infoRows[0].plan_title : "a plan";
+                          const name = (!err && infoRows.length) ? infoRows[0].name       : "A user";
+                          const plan = (!err && infoRows.length) ? infoRows[0].plan_title : "a plan";
 
                           createAdminNotification(
                             "subscription",
@@ -284,8 +323,6 @@ router.post("/success", auth, (req, res) => {
     }
   );
 });
-
-
 
 
 /* ==================================================
@@ -312,10 +349,6 @@ router.get("/check", auth, (req, res) => {
     }
   );
 });
-
-
-
-
 
 
 module.exports = router;
