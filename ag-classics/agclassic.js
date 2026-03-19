@@ -22,7 +22,7 @@ router.get("/", async (req, res) => {
     const orderBy = sortMap[sort] || "p.created_at DESC";
 
     let formatClause = "";
-    if (format === "ebook")    formatClause = "AND p.product_type IN ('ebook','both')";
+    if (format === "ebook")         formatClause = "AND p.product_type IN ('ebook','both')";
     else if (format === "physical") formatClause = "AND p.product_type IN ('physical','both')";
 
     const dataQuery = `
@@ -55,10 +55,10 @@ router.get("/", async (req, res) => {
         ON pc.category_id = c.id
         AND c.imprint = 'agclassics'
 
-      LEFT JOIN ebooks e          ON e.product_id = p.id
+      LEFT JOIN ebooks e           ON e.product_id = p.id
       LEFT JOIN product_authors pa ON p.id = pa.product_id
-      LEFT JOIN authors a         ON pa.author_id = a.id
-      LEFT JOIN reviews r         ON p.id = r.product_id AND r.status = 'approved'
+      LEFT JOIN authors a          ON pa.author_id = a.id
+      LEFT JOIN reviews r          ON p.id = r.product_id AND r.status = 'approved'
 
       WHERE p.status = 'published'
       ${formatClause}
@@ -87,11 +87,10 @@ router.get("/", async (req, res) => {
     const products = rows.map((row) => ({
       ...row,
       authors:          row.authors          ? JSON.parse(row.authors) : [],
-      avg_rating:       row.avg_rating        ? parseFloat(row.avg_rating)   : null,
-      review_count:     row.review_count      ? parseInt(row.review_count)   : 0,
-      // ebook_price / ebook_sell_price are null when the product has no ebook entry
-      ebook_price:      row.ebook_price       ? parseFloat(row.ebook_price)      : null,
-      ebook_sell_price: row.ebook_sell_price  ? parseFloat(row.ebook_sell_price) : null,
+      avg_rating:       row.avg_rating        ? parseFloat(row.avg_rating)        : null,
+      review_count:     row.review_count      ? parseInt(row.review_count)        : 0,
+      ebook_price:      row.ebook_price       ? parseFloat(row.ebook_price)       : null,
+      ebook_sell_price: row.ebook_sell_price  ? parseFloat(row.ebook_sell_price)  : null,
     }));
 
     res.status(200).json({
@@ -112,6 +111,10 @@ router.get("/", async (req, res) => {
 /*
   GET /api/ag-classics/:slug
   Single product — must belong to ag-classics category WITH imprint = 'agclassics'
+
+  FIX: now also returns flat ebook_price / ebook_sell_price fields (MIN across all
+       ebook variants) so the frontend can use them directly without having to
+       parse the ebook_files array.
 */
 router.get("/:slug", async (req, res) => {
   try {
@@ -131,6 +134,11 @@ router.get("/:slug", async (req, res) => {
         p.stock,
         p.product_type,
         p.created_at,
+
+        -- ── FIX: flat ebook pricing (same as listing endpoint) ──────────
+        MIN(e.price)      AS ebook_price,
+        MIN(e.sell_price) AS ebook_sell_price,
+        -- ────────────────────────────────────────────────────────────────
 
         -- Authors
         CONCAT('[', IFNULL(GROUP_CONCAT(
@@ -209,8 +217,12 @@ router.get("/:slug", async (req, res) => {
         gallery,
         ebook_files,
         attributes:   row.attributes ? JSON.parse(row.attributes) : [],
-        avg_rating:   row.avg_rating   ? parseFloat(row.avg_rating)   : null,
-        review_count: row.review_count ? parseInt(row.review_count)   : 0,
+        avg_rating:   row.avg_rating   ? parseFloat(row.avg_rating)        : null,
+        review_count: row.review_count ? parseInt(row.review_count)        : 0,
+        // ── FIX: expose flat ebook pricing ─────────────────────────────
+        ebook_price:      row.ebook_price      ? parseFloat(row.ebook_price)      : null,
+        ebook_sell_price: row.ebook_sell_price ? parseFloat(row.ebook_sell_price) : null,
+        // ────────────────────────────────────────────────────────────────
       },
     });
 
