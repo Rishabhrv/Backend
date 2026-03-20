@@ -11,21 +11,21 @@ router.get("/", (req, res) => {
 
   const search = `%${q}%`;
 
-  const productSql = `
-    SELECT DISTINCT
-      p.id,
-      p.title,
-      p.slug,
-      p.main_image
-    FROM products p
-    JOIN product_categories pc ON pc.product_id = p.id
-    JOIN categories cat ON cat.id = pc.category_id
-    WHERE p.status = 'published'
-      AND p.title LIKE ?
-      AND cat.imprint = 'agclassics'
-    ORDER BY p.created_at DESC
-    LIMIT 5
-  `;
+const productSql = `
+  SELECT DISTINCT
+    p.id,
+    p.title,
+    p.slug,
+    p.main_image
+  FROM products p
+  LEFT JOIN product_categories pc ON pc.product_id = p.id
+  LEFT JOIN categories cat ON cat.id = pc.category_id
+  WHERE p.status = 'published'
+    AND p.title LIKE ?
+    AND LOWER(cat.imprint) = 'agclassics'
+  ORDER BY p.created_at DESC
+  LIMIT 5
+`;
 
   const authorSql = `
     SELECT DISTINCT
