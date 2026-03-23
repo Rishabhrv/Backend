@@ -47,7 +47,7 @@ router.get("/by-date", auth, (req, res) => {
     JOIN order_items oi ON oi.order_id = o.id
     JOIN products pr ON pr.id = oi.product_id
     INNER JOIN product_categories pc ON pc.product_id = pr.id
-    INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
+    INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agclassics'
     LEFT JOIN shipping s ON s.order_id = o.id
     WHERE o.user_id = ?
       AND o.payment_status = 'success'
@@ -126,7 +126,7 @@ router.get("/:orderId", auth, (req, res) => {
     LEFT JOIN shipping s ON s.order_id = o.id
     LEFT JOIN order_address oa ON oa.order_id = o.id
     INNER JOIN product_categories pc ON pc.product_id = pr.id
-    INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
+    INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agclassics'
   
     WHERE o.id = ?
     AND o.user_id = ?
