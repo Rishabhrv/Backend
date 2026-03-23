@@ -120,6 +120,9 @@ router.get("/:slug", async (req, res) => {
   try {
     const { slug } = req.params;
 
+    // 🔥 IMPORTANT: Fix GROUP_CONCAT limit
+    await db.promise().query("SET SESSION group_concat_max_len = 1000000");
+
     const query = `
       SELECT
         p.id,
@@ -135,39 +138,44 @@ router.get("/:slug", async (req, res) => {
         p.product_type,
         p.created_at,
 
-        -- ── FIX: flat ebook pricing (same as listing endpoint) ──────────
         MIN(e.price)      AS ebook_price,
         MIN(e.sell_price) AS ebook_sell_price,
-        -- ────────────────────────────────────────────────────────────────
 
         -- Authors
         CONCAT('[', IFNULL(GROUP_CONCAT(
-          DISTINCT JSON_OBJECT(
-            'id', a.id, 'name', a.name,
-            'slug', a.slug, 'profile_image', a.profile_image,
+          JSON_OBJECT(
+            'id', a.id,
+            'name', a.name,
+            'slug', a.slug,
+            'profile_image', a.profile_image,
             'bio', a.bio
           )
         ), ''), ']') AS authors,
 
         -- Gallery
         CONCAT('[', IFNULL(GROUP_CONCAT(
-          DISTINCT JSON_OBJECT(
-            'id', pg.id, 'image_path', pg.image_path, 'sort_order', pg.sort_order
+          JSON_OBJECT(
+            'id', pg.id,
+            'image_path', pg.image_path,
+            'sort_order', pg.sort_order
           )
         ), ''), ']') AS gallery,
 
-        -- Ebook files with their individual prices
+        -- Ebook files
         CONCAT('[', IFNULL(GROUP_CONCAT(
-          DISTINCT JSON_OBJECT(
-            'id', e.id, 'file_type', e.file_type,
-            'price', e.price, 'sell_price', e.sell_price
+          JSON_OBJECT(
+            'id', e.id,
+            'file_type', e.file_type,
+            'price', e.price,
+            'sell_price', e.sell_price
           )
         ), ''), ']') AS ebook_files,
 
-        -- Attributes (pages, language, edition, etc.)
+        -- Attributes
         CONCAT('[', IFNULL(GROUP_CONCAT(
-          DISTINCT JSON_OBJECT(
-            'name', attr.name, 'value', pa.value
+          JSON_OBJECT(
+            'name', attr.name,
+            'value', pa.value
           )
         ), ''), ']') AS attributes,
 
@@ -175,10 +183,9 @@ router.get("/:slug", async (req, res) => {
         COUNT(DISTINCT r.id)    AS review_count
 
       FROM products p
+
       JOIN product_categories pc ON p.id = pc.product_id
-      JOIN categories c
-        ON pc.category_id = c.id
-        AND c.imprint = 'agclassics'
+      JOIN categories c ON pc.category_id = c.id
 
       LEFT JOIN product_authors pa2  ON p.id = pa2.product_id
       LEFT JOIN authors a            ON pa2.author_id = a.id
@@ -188,8 +195,9 @@ router.get("/:slug", async (req, res) => {
       LEFT JOIN attributes attr      ON pa.attribute_id = attr.id
       LEFT JOIN reviews r            ON p.id = r.product_id AND r.status = 'approved'
 
-      WHERE p.slug   = ?
+      WHERE p.slug = ?
         AND p.status = 'published'
+        AND (c.imprint = 'agclassics' OR c.imprint IS NULL)
 
       GROUP BY p.id
     `;
@@ -197,41 +205,57 @@ router.get("/:slug", async (req, res) => {
     const [rows] = await db.promise().query(query, [slug]);
 
     if (!rows.length) {
-      return res.status(404).json({ success: false, message: "Product not found in AG Classics" });
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
     }
 
     const row = rows[0];
 
-    let gallery = row.gallery ? JSON.parse(row.gallery) : [];
-    gallery = gallery
+    // ✅ SAFE JSON PARSER
+    const safeParse = (data) => {
+      try {
+        return data ? JSON.parse(data) : [];
+      } catch (e) {
+        console.error("JSON Parse Error:", data);
+        return [];
+      }
+    };
+
+    let gallery = safeParse(row.gallery)
       .filter((g) => g.image_path)
-      .sort((a, b) => a.sort_order - b.sort_order);
+      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
 
-    const ebook_files = row.ebook_files ? JSON.parse(row.ebook_files) : [];
-
-    res.status(200).json({
+    const response = {
       success: true,
       product: {
         ...row,
-        authors:      row.authors    ? JSON.parse(row.authors) : [],
+
+        authors: safeParse(row.authors),
         gallery,
-        ebook_files,
-        attributes:   row.attributes ? JSON.parse(row.attributes) : [],
-        avg_rating:   row.avg_rating   ? parseFloat(row.avg_rating)        : null,
-        review_count: row.review_count ? parseInt(row.review_count)        : 0,
-        // ── FIX: expose flat ebook pricing ─────────────────────────────
-        ebook_price:      row.ebook_price      ? parseFloat(row.ebook_price)      : null,
+        ebook_files: safeParse(row.ebook_files),
+        attributes: safeParse(row.attributes),
+
+        avg_rating: row.avg_rating ? parseFloat(row.avg_rating) : null,
+        review_count: row.review_count ? parseInt(row.review_count) : 0,
+
+        ebook_price: row.ebook_price ? parseFloat(row.ebook_price) : null,
         ebook_sell_price: row.ebook_sell_price ? parseFloat(row.ebook_sell_price) : null,
-        // ────────────────────────────────────────────────────────────────
-      },
-    });
+      }
+    };
+
+    res.status(200).json(response);
 
   } catch (error) {
-    console.error("Single AG Classic Error:", error);
-    res.status(500).json({ success: false, message: "Server error while fetching product" });
+    console.error("🔥 FULL ERROR:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message || "Server error"
+    });
   }
 });
-
 /*
   GET /api/ag-classics/:slug/reviews
   Paginated approved reviews for a product
