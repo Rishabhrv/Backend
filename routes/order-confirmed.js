@@ -43,6 +43,8 @@ router.get("/:orderId", auth, (req, res) => {
     FROM orders o
     LEFT JOIN shipping s ON s.order_id = o.id
     WHERE o.id = ? AND o.user_id = ?
+      AND o.status = 'paid'           
+      AND o.payment_status = 'success'
     LIMIT 1
   `;
 

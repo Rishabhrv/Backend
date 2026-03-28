@@ -25,15 +25,19 @@ const upload = multer({ storage });
 router.get("/", (req, res) => {
   db.query(
     `
-    SELECT 
-      id,
-      name,
-      slug,
-      profile_image,
-      bio,
-      status
-    FROM authors
-    ORDER BY name ASC
+    SELECT DISTINCT 
+      a.id, 
+      a.name, 
+      a.slug, 
+      a.profile_image, 
+      a.bio, 
+      a.status
+    FROM authors a
+    JOIN product_authors pa ON a.id = pa.author_id
+    JOIN product_categories pc ON pa.product_id = pc.product_id
+    JOIN categories c ON pc.category_id = c.id
+    WHERE c.imprint = 'agclassics'
+    ORDER BY a.name ASC
     `,
     (err, rows) => {
       if (err) return res.status(500).json(err);

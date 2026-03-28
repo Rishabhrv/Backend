@@ -35,6 +35,7 @@ router.get("/", async (req, res) => {
         p.sell_price,
         p.main_image,
         p.stock,
+        p.status,
         p.product_type,
         p.created_at,
 

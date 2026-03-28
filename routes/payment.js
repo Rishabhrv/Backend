@@ -174,15 +174,26 @@ router.post("/verify", auth, (req, res) => {
         (err) => {
           if (err) console.error("Stock deduction error:", err);
 
-          // 4. Clear cart
-          db.query("DELETE FROM cart WHERE user_id = ?", [req.user.id], () => {
+        // 4. Insert into shipping table
+          db.query(
+            `INSERT INTO shipping (order_id, status, confirmed_at)
+             VALUES (?, 'confirmed', NOW())
+             ON DUPLICATE KEY UPDATE status = 'confirmed', confirmed_at = NOW()`,
+            [order_id],
+            (err) => {
+              if (err) console.error("Shipping insert error:", err);          
 
-            // 5. Send confirmed email — fire and forget, never blocks this response
-            sendOrderConfirmedEmail(order_id);
+              // 5. Clear cart
+              db.query("DELETE FROM cart WHERE user_id = ?", [req.user.id], () => {          
 
-            // 6. Respond to frontend with order_id for redirect
-            res.json({ msg: "Payment verified", order_id });
-          });
+                // 6. Send confirmed email — fire and forget, never blocks this response
+                sendOrderConfirmedEmail(order_id);          
+
+                // 7. Respond to frontend with order_id for redirect
+                res.json({ msg: "Payment verified", order_id });
+              });
+            }
+          );
         }
       );
     }

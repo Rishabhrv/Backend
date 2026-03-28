@@ -42,6 +42,31 @@ router.get("/", (req, res) => {
   );
 });
 
+router.get("/home-author", (req, res) => {
+  db.query(
+    `
+    SELECT DISTINCT 
+      a.id, 
+      a.name, 
+      a.slug, 
+      a.profile_image, 
+      a.bio, 
+      a.status
+    FROM authors a
+    JOIN product_authors pa ON a.id = pa.author_id
+    JOIN product_categories pc ON pa.product_id = pc.product_id
+    JOIN categories c ON pc.category_id = c.id
+    WHERE c.imprint = 'agph'
+    ORDER BY a.name ASC
+    `,
+    (err, rows) => {
+      if (err) return res.status(500).json(err);
+      res.json(rows);
+    }
+  );
+});
+
+
 
 /* ADD NEW AUTHOR */
 router.post("/", upload.single("profile_image"), (req, res) => {
