@@ -91,6 +91,7 @@ router.post("/add", auth, (req, res) => {
 
 
 /* ================= GET MY CART ================= */
+// GET MY CART — replace LEFT JOIN ebooks with a subquery
 router.get("/my", auth, (req, res) => {
   const sql = `
     SELECT 
@@ -103,7 +104,9 @@ router.get("/my", auth, (req, res) => {
       p.main_image,
       p.stock,
       CASE 
-        WHEN c.format = 'ebook' THEN e.sell_price
+        WHEN c.format = 'ebook' THEN (
+          SELECT sell_price FROM ebooks WHERE product_id = p.id LIMIT 1
+        )
         ELSE p.sell_price
       END AS price,
       (
@@ -114,7 +117,6 @@ router.get("/my", auth, (req, res) => {
       ) AS category_imprints
     FROM cart c
     JOIN products p ON p.id = c.product_id
-    LEFT JOIN ebooks e ON e.product_id = p.id
     WHERE c.user_id = ?
   `;
 
@@ -123,6 +125,8 @@ router.get("/my", auth, (req, res) => {
     res.json(rows);
   });
 });
+
+
 
 /* ================= UPDATE QUANTITY ================= */
 router.put("/update/:id", auth, (req, res) => {
@@ -155,13 +159,19 @@ router.delete("/remove/:id", auth, (req, res) => {
   );
 });
 
+// COUNT — use a subquery to avoid category JOIN multiplication
 router.get("/count", auth, (req, res) => {
   db.query(
-    `SELECT SUM(c.quantity) AS count 
-    FROM cart c
-    JOIN product_categories pc ON pc.product_id = c.product_id
-    JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
-    WHERE c.user_id = ?`,
+    `SELECT SUM(c.quantity) AS count
+     FROM cart c
+     WHERE c.user_id = ?
+       AND EXISTS (
+         SELECT 1
+         FROM product_categories pc
+         JOIN categories cat ON cat.id = pc.category_id
+         WHERE pc.product_id = c.product_id
+           AND cat.imprint = 'agph'
+       )`,
     [req.user.id],
     (err, rows) => {
       if (err) return res.status(500).json({ count: 0 });
