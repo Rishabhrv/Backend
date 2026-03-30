@@ -19,7 +19,7 @@ router.get("/", (req, res) => {
         p.id,
         p.title,
         p.slug,
-        p.main_image
+        p.main_image 
       FROM products p
       LEFT JOIN product_categories pc ON pc.product_id = p.id
       LEFT JOIN categories cat ON cat.id = pc.category_id
