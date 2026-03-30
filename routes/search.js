@@ -3,56 +3,87 @@ const db = require("../db");
 const router = express.Router();
 
 router.get("/", (req, res) => {
-  const q = req.query.q;
+  try {
+    const q = req.query.q;
 
-  if (!q || q.trim() === "") {
-    return res.json({ products: [], authors: [] });
-  }
+    // ✅ Empty query handling
+    if (!q || q.trim() === "") {
+      return res.json({ products: [], authors: [] });
+    }
 
-  const search = `%${q}%`;
+    const search = `%${q.trim()}%`;
 
-  const productSql = `
-    SELECT DISTINCT
-      p.id,
-      p.title,
-      p.slug,
-      p.main_image
-    FROM products p
-    JOIN product_categories pc ON pc.product_id = p.id
-    JOIN categories cat ON cat.id = pc.category_id
-    WHERE p.status = 'published'
-      AND p.title LIKE ?
-      AND cat.imprint = 'agph'
-    ORDER BY p.created_at DESC
-    LIMIT 5
-  `;
+    // ✅ FIXED: safer query (LEFT JOIN + GROUP BY instead of DISTINCT)
+    const productSql = `
+      SELECT 
+        p.id,
+        p.title,
+        p.slug,
+        p.main_image 
+      FROM products p
+      LEFT JOIN product_categories pc ON pc.product_id = p.id
+      LEFT JOIN categories cat ON cat.id = pc.category_id
+      WHERE p.status = 'published'
+        AND p.title LIKE ?
+        AND (cat.imprint = 'agph' OR cat.imprint IS NULL)
+      GROUP BY p.id
+      ORDER BY p.created_at DESC
+      LIMIT 5
+    `;
 
-  const authorSql = `
-    SELECT DISTINCT
-      a.id,
-      a.name,
-      a.slug,
-      a.profile_image
-    FROM authors a
-    JOIN product_authors pa ON pa.author_id = a.id
-    JOIN product_categories pc ON pc.product_id = pa.product_id
-    JOIN categories cat ON cat.id = pc.category_id
-    WHERE a.status = 'active'
-      AND a.name LIKE ?
-      AND cat.imprint = 'agph'
-    ORDER BY a.name ASC
-    LIMIT 5
-  `;
+    const authorSql = `
+      SELECT 
+        a.id,
+        a.name,
+        a.slug,
+        a.profile_image
+      FROM authors a
+      LEFT JOIN product_authors pa ON pa.author_id = a.id
+      LEFT JOIN product_categories pc ON pc.product_id = pa.product_id
+      LEFT JOIN categories cat ON cat.id = pc.category_id
+      WHERE a.status = 'active'
+        AND a.name LIKE ?
+        AND (cat.imprint = 'agph' OR cat.imprint IS NULL)
+      GROUP BY a.id
+      ORDER BY a.name ASC
+      LIMIT 5
+    `;
 
-  db.query(productSql, [search], (err, products) => {
-    if (err) return res.status(500).json({ msg: "Product search failed" });
+    // ✅ Execute product query
+    db.query(productSql, [search], (err, products) => {
+      if (err) {
+        console.error("PRODUCT ERROR:", err);
+        return res.status(500).json({
+          msg: "Product search failed",
+          error: err.message
+        });
+      }
 
-    db.query(authorSql, [search], (err, authors) => {
-      if (err) return res.status(500).json({ msg: "Author search failed" });
+      // ✅ Execute author query
+      db.query(authorSql, [search], (err, authors) => {
+        if (err) {
+          console.error("AUTHOR ERROR:", err);
+          return res.status(500).json({
+            msg: "Author search failed",
+            error: err.message
+          });
+        }
 
-      res.json({ products, authors });
+        // ✅ Final response
+        res.json({
+          products: products || [],
+          authors: authors || []
+        });
+      });
     });
-  });
+
+  } catch (error) {
+    console.error("UNEXPECTED ERROR:", error);
+    res.status(500).json({
+      msg: "Unexpected server error",
+      error: error.message
+    });
+  }
 });
 
 module.exports = router;

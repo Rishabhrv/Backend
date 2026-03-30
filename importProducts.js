@@ -39,7 +39,7 @@ async function getOrCreate(table, data, uniqueKey, value) {
   console.log("🚀 Product import started...");
 
   const stream = fs
-    .createReadStream("./filtered_no_duplicates.csv", { encoding: "utf8" }) // ✅ FIX 1: explicit UTF-8
+    .createReadStream("./productfilehi.csv", { encoding: "utf8" }) // ✅ FIX 1: explicit UTF-8
     .pipe(
       csv({
         mapHeaders: ({ header }) =>
@@ -60,7 +60,7 @@ async function getOrCreate(table, data, uniqueKey, value) {
     const productName = col("name");
     if (!productName) continue; // skip empty rows
 
-    const slug = col("slug") || slugify(productName);
+    const slug = slugify(productName);
 
     const [productRes] = await query(
       `INSERT INTO products
