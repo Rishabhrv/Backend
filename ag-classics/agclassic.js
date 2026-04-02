@@ -43,9 +43,14 @@ router.get("/", async (req, res) => {
         MIN(e.price)      AS ebook_price,
         MIN(e.sell_price) AS ebook_sell_price,
 
-        CONCAT('[', IFNULL(GROUP_CONCAT(
-          DISTINCT JSON_OBJECT('id', a.id, 'name', a.name, 'slug', a.slug)
-        ), ''), ']') AS authors,
+            CONCAT('[', IFNULL(GROUP_CONCAT(
+              DISTINCT JSON_OBJECT(
+                'id',            a.id,
+                'name',          a.name,
+                'slug',          a.slug,
+                'profile_image', a.profile_image
+              )
+            ), ''), ']') AS authors,
 
         ROUND(AVG(r.rating), 1) AS avg_rating,
         COUNT(DISTINCT r.id)    AS review_count

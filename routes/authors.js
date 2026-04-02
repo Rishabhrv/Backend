@@ -57,6 +57,17 @@ router.get("/home-author", (req, res) => {
     JOIN product_categories pc ON pa.product_id = pc.product_id
     JOIN categories c ON pc.category_id = c.id
     WHERE c.imprint = 'agph'
+      AND a.slug IN (
+        'abhishek-singh',
+        'alkesh-khakre',
+        'dilliraja-sundar',
+        'dr-amit-kumar-meena',
+        'dr-anamika-das',
+        'dr-ashok-soni',
+        'dr-c-rama-rao',
+        'dr-dprakash',
+        'dr-ishwar-baburao-ghorude'
+      )
     ORDER BY a.name ASC
     `,
     (err, rows) => {
