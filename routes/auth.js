@@ -19,7 +19,8 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_MINUTES = 15;
 /* ════════════════════════════════════════
    GET LOGGED IN USER
 ════════════════════════════════════════ */
@@ -177,29 +178,77 @@ router.post("/register", async (req, res) => {
 ════════════════════════════════════════ */
 router.post("/login", (req, res) => {
   const { email, password } = req.body;
+  const identifier = email?.toLowerCase().trim();
 
+  if (!identifier) return res.status(400).json({ msg: "Email is required." });
+
+  const windowStart = new Date(Date.now() - LOCKOUT_MINUTES * 60 * 1000);
+
+  // 1. Count recent failed attempts
   db.query(
-    "SELECT id, password, provider, status FROM users WHERE email = ?",
-    [email],
-    async (err, result) => {
+    `SELECT COUNT(*) AS attempts FROM login_attempts
+     WHERE identifier = ? AND attempted_at > ?`,
+    [identifier, windowStart],
+    (err, rows) => {
       if (err) return res.status(500).json({ msg: "DB error" });
-      if (result.length === 0)
-        return res.status(400).json({ msg: "User not found" });
 
-      const user = result[0];
+      const attempts = rows[0].attempts;
 
-      if (user.status !== "active") {
-        return res.status(403).json({
-          msg: "Your account has been blocked. Please contact support.",
-        });
+      if (attempts >= MAX_ATTEMPTS) {
+        // Find when the oldest attempt in the window expires
+        db.query(
+          `SELECT attempted_at FROM login_attempts
+           WHERE identifier = ? AND attempted_at > ?
+           ORDER BY attempted_at ASC LIMIT 1`,
+          [identifier, windowStart],
+          (err2, oldest) => {
+            if (err2) return res.status(500).json({ msg: "DB error" });
+            const unlockAt    = new Date(new Date(oldest[0].attempted_at).getTime() + LOCKOUT_MINUTES * 60 * 1000);
+            const minutesLeft = Math.ceil((unlockAt - Date.now()) / 60000);
+            return res.status(429).json({
+              msg: `Too many failed attempts. Please try again in ${minutesLeft} minute${minutesLeft !== 1 ? "s" : ""}.`,
+              locked: true,
+              minutesLeft,
+            });
+          }
+        );
+        return;
       }
 
-      const valid = await bcrypt.compare(password, user.password);
-      if (!valid)
-        return res.status(400).json({ msg: "Wrong password" });
+      // 2. Fetch user
+      db.query(
+        "SELECT id, password, provider, status FROM users WHERE email = ?",
+        [identifier],
+        async (err3, result) => {
+          if (err3) return res.status(500).json({ msg: "DB error" });
 
-      const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: "24h" });
-      res.json({ token });
+          const user = result[0];
+          const valid = user ? await bcrypt.compare(password, user.password) : false;
+
+          if (!user || !valid) {
+            // Record failed attempt
+            db.query(`INSERT INTO login_attempts (identifier) VALUES (?)`, [identifier]);
+
+            const remaining = MAX_ATTEMPTS - attempts - 1;
+            return res.status(400).json({
+              msg: remaining > 0
+                ? `Incorrect email or password. ${remaining} attempt${remaining !== 1 ? "s" : ""} remaining.`
+                : `Too many failed attempts. Please try again in ${LOCKOUT_MINUTES} minutes.`,
+              remaining,
+            });
+          }
+
+          if (user.status !== "active") {
+            return res.status(403).json({ msg: "Your account has been blocked. Please contact support." });
+          }
+
+          // Success — clear attempts
+          db.query(`DELETE FROM login_attempts WHERE identifier = ?`, [identifier]);
+
+          const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: "24h" });
+          res.json({ token });
+        }
+      );
     }
   );
 });
