@@ -6,6 +6,16 @@ const slugify = require("slugify");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+const generateSlug = (text) => {
+  return text
+    .toString()
+    .normalize("NFC")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\p{M}\s-]/gu, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+};
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -87,7 +97,7 @@ router.post("/", upload.single("profile_image"), (req, res) => {
     return res.status(400).json({ message: "Author name required" });
   }
 
-  const slug = slugify(name, { lower: true, strict: true });
+  const slug = generateSlug(name);
 
   const imagePath = req.file
     ? `/uploads/authors/${req.file.filename}`
@@ -143,7 +153,8 @@ router.put("/:id", upload.single("profile_image"), (req, res) => {
     return res.status(400).json({ message: "Author name required" });
   }
 
-  const slug = slugify(name, { lower: true, strict: true });
+  const slug = generateSlug(name);
+
 
   const imagePath = req.file
     ? `/uploads/authors/${req.file.filename}`
