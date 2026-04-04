@@ -7,8 +7,11 @@ const SECRET = "MY_SECRET_KEY";
 const nodemailer = require("nodemailer");
 const adminOtpStore = new Map();
 
+
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host:   process.env.MAIL_HOST || "smtp.gmail.com",
+  port:   Number(process.env.MAIL_PORT) || 587,
+  secure: Number(process.env.MAIL_PORT) === 465,  // true for 465, false for 587
   auth: {
     user: process.env.MAIL_USER,
     pass: process.env.MAIL_PASS,
@@ -245,7 +248,7 @@ router.post("/send-change-password-otp", adminAuth, async (req, res) => {
 
       try {
         await transporter.sendMail({
-          from: `"AGPH Admin" <${process.env.EMAIL_USER}>`,
+          from: `"AGPH Admin" <${process.env.MAIL_USER}>`,
           to: email,
           subject: "Admin Password Change OTP",
           html: `

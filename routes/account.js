@@ -10,9 +10,16 @@ const SECRET = "MY_SECRET_KEY";
 /* ─── In-memory OTP store (use Redis in prod) ─── */
 const otpStore = new Map();
 
+
+
 const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: { user: process.env.MAIL_USER, pass: process.env.MAIL_PASS },
+  host:   process.env.MAIL_HOST || "smtp.gmail.com",
+  port:   Number(process.env.MAIL_PORT) || 587,
+  secure: Number(process.env.MAIL_PORT) === 465,  // true for 465, false for 587
+  auth: {
+    user: process.env.MAIL_USER,
+    pass: process.env.MAIL_PASS,
+  },
 });
 
 /* ─── Auth middleware ─── */
