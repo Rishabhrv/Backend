@@ -28,10 +28,12 @@ const razorpay = new Razorpay({
 });
 
 /* ── MAILER (same config as adminorder.js) ── */
+
+
 const transporter = nodemailer.createTransport({
   host:   process.env.MAIL_HOST || "smtp.gmail.com",
   port:   Number(process.env.MAIL_PORT) || 587,
-  secure: false,
+  secure: Number(process.env.MAIL_PORT) === 465,  // true for 465, false for 587
   auth: {
     user: process.env.MAIL_USER,
     pass: process.env.MAIL_PASS,
