@@ -824,49 +824,24 @@ router.get("/random/featured", (req, res) => {
 router.get("/slug/:slug", (req, res) => {
   const { slug } = req.params;
 
-    const sql = `
-      SELECT 
-        p.id,
-        p.title,
-        p.slug,
-        p.description,
-        p.price,
-        p.sell_price,
-        p.stock,
-        p.product_type,
-        p.main_image,
-    
-        MAX(sd.weight) AS weight,
-        MAX(sd.length) AS length,
-        MAX(sd.width)  AS width,
-        MAX(sd.height) AS height,
-        
-        MAX(e.file_path)   AS ebook_path,
-        MAX(e.price)       AS ebook_price,
-        MAX(e.sell_price)  AS ebook_sell_price,
-    
-        GROUP_CONCAT(DISTINCT a.id)            AS author_ids,
-        GROUP_CONCAT(DISTINCT a.name)          AS author_names,
-        GROUP_CONCAT(DISTINCT a.profile_image) AS author_images,
-        GROUP_CONCAT(DISTINCT a.bio)           AS author_bios,
-        GROUP_CONCAT(DISTINCT a.slug)          AS author_slugs,
-    
-        GROUP_CONCAT(DISTINCT c.id)      AS category_ids,
-        GROUP_CONCAT(DISTINCT c.name)    AS category_names,
-        GROUP_CONCAT(DISTINCT c.slug)    AS category_slugs,
-        GROUP_CONCAT(DISTINCT c.imprint) AS category_imprints
-    
-      FROM products p
-      LEFT JOIN shipping_details sd   ON sd.product_id = p.id
-      LEFT JOIN ebooks e              ON e.product_id  = p.id
-      LEFT JOIN product_authors pa    ON pa.product_id = p.id
-      LEFT JOIN authors a             ON a.id          = pa.author_id
-      LEFT JOIN product_categories pc ON pc.product_id = p.id
-      LEFT JOIN categories c          ON c.id          = pc.category_id
-      WHERE p.slug = ?
-        AND p.status = 'published'
-      GROUP BY p.id
-    `;
+  // 1. Fetch the main product and shipping/ebook details only
+  const sql = `
+    SELECT 
+      p.id, p.title, p.slug, p.description, p.price, p.sell_price, p.stock, 
+      p.product_type, p.main_image,
+      
+      MAX(sd.weight) AS weight, MAX(sd.length) AS length, 
+      MAX(sd.width)  AS width, MAX(sd.height) AS height,
+      
+      MAX(e.file_path)   AS ebook_path,
+      MAX(e.price)       AS ebook_price,
+      MAX(e.sell_price)  AS ebook_sell_price
+    FROM products p
+    LEFT JOIN shipping_details sd ON sd.product_id = p.id
+    LEFT JOIN ebooks e            ON e.product_id  = p.id
+    WHERE p.slug = ? AND p.status = 'published'
+    GROUP BY p.id
+  `;
 
   db.query(sql, [slug], (err, rows) => {
     if (err) {
@@ -880,93 +855,86 @@ router.get("/slug/:slug", (req, res) => {
 
     const product = rows[0];
 
-    // ── AGPH GATE: block if no agph category ─────────────────────────────
-    const imprints = product.category_imprints
-      ? product.category_imprints.split(",")
-      : [];
-
-    if (!imprints.includes("agph")) {
-      return res.status(404).json({ message: "Product not found" });
-    }
-    // ─────────────────────────────────────────────────────────────────────
-
-    /* ================= BUILD AUTHORS ================= */
-    product.authors = product.author_ids
-      ? product.author_ids.split(",").map((id, i) => ({
-          id:    Number(id),
-          name:  product.author_names?.split(",")[i]  || "",
-          image: product.author_images?.split(",")[i] || null,
-          bio:   product.author_bios?.split(",")[i]   || null,
-          slug:  product.author_slugs?.split(",")[i]  || "",
-        }))
-      : [];
-
-    /* ================= BUILD CATEGORIES (with imprint) ================= */
-    product.categories = product.category_ids
-      ? product.category_ids.split(",").map((id, i) => ({
-          id:      Number(id),
-          name:    product.category_names?.split(",")[i]    || "",
-          slug:    product.category_slugs?.split(",")[i]    || "",
-          imprint: product.category_imprints?.split(",")[i] || "",  // ← NEW
-        }))
-      : [];
-
-    /* ================= CLEAN TEMP FIELDS ================= */
-    delete product.author_ids;
-    delete product.author_names;
-    delete product.author_images;
-    delete product.author_bios;
-    delete product.author_slugs;
-
-    delete product.category_ids;
-    delete product.category_names;
-    delete product.category_slugs;
-    delete product.category_imprints;
-
-/* ================= ATTRIBUTES ================= */
-db.query(
-  `SELECT a.name, pa.value
-   FROM product_attributes pa
-   JOIN attributes a ON a.id = pa.attribute_id
-   WHERE pa.product_id = ?`,
-  [product.id],
-  (err, attributes) => {
-    if (err) return res.status(500).json({ message: "Attribute fetch failed" });
-
-    product.attributes = attributes || [];
-
-    /* ================= GALLERY ================= */
+    /* ================= CATEGORIES ================= */
     db.query(
-      `SELECT image_path
-       FROM product_gallery
-       WHERE product_id = ?
-       ORDER BY sort_order ASC`,
+      `SELECT c.id, c.name, c.slug, c.imprint
+       FROM product_categories pc
+       JOIN categories c ON c.id = pc.category_id
+       WHERE pc.product_id = ?`,
       [product.id],
-      (err, gallery) => {
-        if (err) return res.status(500).json({ message: "Gallery fetch failed" });
+      (err, categories) => {
+        if (err) return res.status(500).json({ message: "Category fetch failed" });
 
-        product.gallery = gallery || [];
+        // ── AGPH GATE: block if no agph category ─────────────────────────────
+        const imprints = categories.map((c) => c.imprint);
+        if (!imprints.includes("agph")) {
+          return res.status(404).json({ message: "Product not found" });
+        }
+        // ─────────────────────────────────────────────────────────────────────
+        
+        product.categories = categories || [];
 
-        /* ================= SUBJECTS ================= */
+        /* ================= AUTHORS (FIXED MISMATCH) ================= */
         db.query(
-          `SELECT s.id, s.name, s.slug
-           FROM product_subjects ps
-           JOIN subjects s ON s.id = ps.subject_id
-           WHERE ps.product_id = ?`,
+          `SELECT a.id, a.name, a.profile_image AS image, a.bio, a.slug
+           FROM product_authors pa
+           JOIN authors a ON a.id = pa.author_id
+           WHERE pa.product_id = ?`,
           [product.id],
-          (err, subjects) => {
-            if (err) return res.status(500).json({ message: "Subject fetch failed" });
+          (err, authors) => {
+            if (err) return res.status(500).json({ message: "Author fetch failed" });
 
-            product.subjects = subjects || [];
+            // Since we pull the raw columns, nulls and commas are handled perfectly.
+            product.authors = authors || [];
 
-            // ✅ ONE single res.json at the very end
-            res.json(product);
+            /* ================= ATTRIBUTES ================= */
+            db.query(
+              `SELECT a.name, pa.value
+               FROM product_attributes pa
+               JOIN attributes a ON a.id = pa.attribute_id
+               WHERE pa.product_id = ?`,
+              [product.id],
+              (err, attributes) => {
+                if (err) return res.status(500).json({ message: "Attribute fetch failed" });
+
+                product.attributes = attributes || [];
+
+                /* ================= GALLERY ================= */
+                db.query(
+                  `SELECT image_path
+                   FROM product_gallery
+                   WHERE product_id = ?
+                   ORDER BY sort_order ASC`,
+                  [product.id],
+                  (err, gallery) => {
+                    if (err) return res.status(500).json({ message: "Gallery fetch failed" });
+
+                    product.gallery = gallery || [];
+
+                    /* ================= SUBJECTS ================= */
+                    db.query(
+                      `SELECT s.id, s.name, s.slug
+                       FROM product_subjects ps
+                       JOIN subjects s ON s.id = ps.subject_id
+                       WHERE ps.product_id = ?`,
+                      [product.id],
+                      (err, subjects) => {
+                        if (err) return res.status(500).json({ message: "Subject fetch failed" });
+
+                        product.subjects = subjects || [];
+
+                        // ✅ ONE single clean res.json at the very end
+                        res.json(product);
+                      }
+                    );
+                  }
+                );
+              }
+            );
           }
         );
       }
     );
-  }
-);
   });
 });
 
