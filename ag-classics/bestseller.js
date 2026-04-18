@@ -41,7 +41,7 @@ router.get("/", async (req, res) => {
     if (format === "ebook")    formatClause = "AND p.product_type IN ('ebook','both')";
     else if (format === "physical") formatClause = "AND p.product_type IN ('physical','both')";
 
-    const dataQuery = `
+   const dataQuery = `
   SELECT
     p.id,
     p.title,
@@ -49,6 +49,8 @@ router.get("/", async (req, res) => {
     p.sku,
     p.price,
     p.sell_price,
+    MIN(e.price) AS ebook_price,       /* ✅ Added this */
+    MIN(e.sell_price) AS ebook_sell_price, /* ✅ Added this */
     p.main_image,
     p.stock,
     p.product_type,
@@ -79,6 +81,7 @@ router.get("/", async (req, res) => {
   LEFT JOIN authors a ON pa.author_id = a.id
 
   LEFT JOIN reviews r ON p.id = r.product_id AND r.status = 'approved'
+  LEFT JOIN ebooks e ON p.id = e.product_id  /* ✅ Added this join */
 
   WHERE p.status = 'published'
   AND c.imprint = 'agclassics'

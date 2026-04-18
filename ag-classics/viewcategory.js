@@ -68,6 +68,8 @@ router.get("/:slug/products", (req, res) => {
               p.slug,
               p.price,
               p.sell_price,
+              MIN(e.price) AS ebook_price,           /* ✅ Pulled from ebooks table */
+              MIN(e.sell_price) AS ebook_sell_price, /* ✅ Pulled from ebooks table */
               p.stock,
               p.product_type,
               p.main_image,
@@ -77,6 +79,7 @@ router.get("/:slug/products", (req, res) => {
             JOIN product_categories pc ON pc.product_id = p.id
             LEFT JOIN product_authors pa ON pa.product_id = p.id
             LEFT JOIN reviews r ON r.product_id = p.id AND r.status = 'approved'
+            LEFT JOIN ebooks e ON e.product_id = p.id /* ✅ Added JOIN here */
             WHERE pc.category_id IN (?)
               AND p.status = 'published'
               AND p.sell_price BETWEEN ? AND ?
