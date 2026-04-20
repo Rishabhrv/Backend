@@ -295,8 +295,12 @@ router.get("/subscription-plans", adminAuth, (req, res) => {
 /* ===============================
    ➕ CREATE SUBSCRIPTION PLAN
 ================================ */
+/* ===============================
+   ➕ CREATE SUBSCRIPTION PLAN
+================================ */
 router.post("/subscription-plans", adminAuth, (req, res) => {
-  const { plan_key, title, base_price, duration_months, description, status, features } = req.body;
+  // 1. Added discount_price to destructured req.body
+  const { plan_key, title, base_price, discount_price, duration_months, description, status, features } = req.body;
   const featuresJson = JSON.stringify(features || []);
 
   const checkSql = `SELECT id FROM subscription_plans WHERE plan_key = ?`;
@@ -306,14 +310,16 @@ router.post("/subscription-plans", adminAuth, (req, res) => {
       return res.status(400).json({ msg: `A ${plan_key} plan already exists.` });
     }
 
+    // 2. Added discount_price to the SQL query
     const insertSql = `
-      INSERT INTO subscription_plans (plan_key, title, base_price, duration_months, description, status, features)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO subscription_plans (plan_key, title, base_price, discount_price, duration_months, description, status, features)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
+    // 3. Added discount_price to the array of values
     db.query(
       insertSql,
-      [plan_key, title, base_price, duration_months, description, status || 'active', featuresJson],
+      [plan_key, title, base_price, discount_price, duration_months, description, status || 'active', featuresJson],
       (err, result) => {
         if (err) return res.status(500).json(err);
         res.json({ success: true, id: result.insertId });
@@ -325,20 +331,27 @@ router.post("/subscription-plans", adminAuth, (req, res) => {
 /* ===============================
    ✏️ UPDATE SUBSCRIPTION PLAN
 ================================ */
+/* ===============================
+   ✏️ UPDATE SUBSCRIPTION PLAN
+================================ */
 router.put("/subscription-plans/:id", adminAuth, (req, res) => {
   const planId = req.params.id;
-  const { plan_key, title, base_price, duration_months, description, status, features } = req.body;
+  
+  // 1. Added discount_price to destructured req.body
+  const { plan_key, title, base_price, discount_price, duration_months, description, status, features } = req.body;
   const featuresJson = JSON.stringify(features || []);
 
+  // 2. Added discount_price = ? to the SQL query
   const sql = `
     UPDATE subscription_plans
-    SET plan_key = ?, title = ?, base_price = ?, duration_months = ?, description = ?, status = ?, features = ?
+    SET plan_key = ?, title = ?, base_price = ?, discount_price = ?, duration_months = ?, description = ?, status = ?, features = ?
     WHERE id = ?
   `;
 
+  // 3. Added discount_price to the array of values
   db.query(
     sql,
-    [plan_key, title, base_price, duration_months, description, status, featuresJson, planId],
+    [plan_key, title, base_price, discount_price, duration_months, description, status, featuresJson, planId],
     (err, result) => {
       if (err) return res.status(500).json(err);
       res.json({ success: true });
