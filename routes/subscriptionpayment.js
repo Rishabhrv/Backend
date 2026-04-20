@@ -81,14 +81,27 @@ router.get("/payments", auth, (req, res) => {
     }
   );
 });
+/* ==================================================
+   🆕 CHECK PROMO ELIGIBILITY (New Users Only)
+================================================== */
+router.get("/eligibility", auth, (req, res) => {
+  const user_id = req.user.id;
+  // If the user has any active, expired, or cancelled subscription, they are NOT a new user.
+  db.query(
+    `SELECT id FROM user_subscriptions WHERE user_id=? AND status IN ('active', 'expired', 'cancelled') LIMIT 1`,
+    [user_id],
+    (err, rows) => {
+      if (err) return res.status(500).json({ msg: "DB error" });
+      res.json({ isNewUser: rows.length === 0 });
+    }
+  );
+});
 
 /* ==================================================
-   1️⃣ CREATE SUBSCRIPTION (PRE-PAY) - FULLY DYNAMIC
+   1️⃣ CREATE SUBSCRIPTION (PRE-PAY) - FULLY DYNAMIC + PROMO
 ================================================== */
 router.post("/create", auth, (req, res) => {
   const user_id = req.user.id;
-  
-  // Notice we only need the plan_key now. The frontend doesn't dictate the months/price anymore.
   const { plan_key } = req.body;
 
   if (!plan_key) {
@@ -106,76 +119,77 @@ router.post("/create", auth, (req, res) => {
       if (err) return res.status(500).json({ msg: "DB error" });
 
       if (activeRows.length > 0) {
-        return res.status(400).json({
-          msg: "You already have an active subscription",
-        });
+        return res.status(400).json({ msg: "You already have an active subscription" });
       }
 
-      /* 2️⃣ FETCH DYNAMIC PLAN DETAILS FROM DB */
+      /* 2️⃣ CHECK IF NEW USER FOR 1 MONTH FREE PROMO */
       db.query(
-        `SELECT id, base_price, duration_months
-         FROM subscription_plans
-         WHERE plan_key=? AND status='active'
-         LIMIT 1`,
-        [plan_key],
-        (err, planRows) => {
-          if (err || planRows.length === 0) {
-            return res.status(400).json({ msg: "Invalid or inactive plan" });
-          }
+        `SELECT id FROM user_subscriptions WHERE user_id=? AND status IN ('active', 'expired', 'cancelled') LIMIT 1`,
+        [user_id],
+        (err, historyRows) => {
+          if (err) return res.status(500).json({ msg: "DB error" });
+          
+          const isNewUser = historyRows.length === 0;
+          const promoMonths = isNewUser ? 1 : 0; // Give 1 extra month if new!
 
-          const plan_id = planRows[0].id;
-          const amount = planRows[0].base_price; // Secured from DB!
-          const months = planRows[0].duration_months; // Secured from DB!
-
-          const start = new Date();
-          const end   = new Date();
-          end.setMonth(end.getMonth() + months);
-
-          /* 3️⃣ CHECK EXISTING PENDING SUBSCRIPTION */
+          /* 3️⃣ FETCH DYNAMIC PLAN DETAILS FROM DB */
           db.query(
-            `SELECT id FROM user_subscriptions
-             WHERE user_id=? AND status='pending'
-             ORDER BY created_at DESC
+            `SELECT id, base_price, discount_price, duration_months
+             FROM subscription_plans
+             WHERE plan_key=? AND status='active'
              LIMIT 1`,
-            [user_id],
-            (err, pendingRows) => {
-              if (err) return res.status(500).json({ msg: "DB error" });
-
-              /* ♻️ REUSE PENDING SUBSCRIPTION */
-              if (pendingRows.length > 0) {
-                const pendingId = pendingRows[0].id;
-
-                db.query(
-                  `UPDATE user_subscriptions
-                   SET plan_id=?, months=?, amount_paid=?, start_date=?, end_date=?
-                   WHERE id=?`,
-                  [plan_id, months, amount, start, end, pendingId],
-                  (err) => {
-                    if (err) console.error("Failed to update pending sub:", err);
-                  }
-                );
-
-                return res.json({
-                  subscription_id: pendingId,
-                  amount,
-                  reused: true,
-                });
+            [plan_key],
+            (err, planRows) => {
+              if (err || planRows.length === 0) {
+                return res.status(400).json({ msg: "Invalid or inactive plan" });
               }
 
-              /* 4️⃣ CREATE NEW PENDING SUBSCRIPTION */
+              const plan_id = planRows[0].id;
+              const amount = planRows[0].discount_price ? planRows[0].discount_price : planRows[0].base_price; 
+              const baseMonths = planRows[0].duration_months;
+
+              const start = new Date();
+              const end   = new Date();
+              // Add base months + promotional months
+              end.setMonth(end.getMonth() + baseMonths + promoMonths);
+
+              /* 4️⃣ CHECK EXISTING PENDING SUBSCRIPTION */
               db.query(
-                `INSERT INTO user_subscriptions
-                 (user_id, plan_id, months, amount_paid, start_date, end_date, status)
-                 VALUES (?,?,?,?,?,?,'pending')`,
-                [user_id, plan_id, months, amount, start, end],
-                (err, result) => {
+                `SELECT id FROM user_subscriptions
+                 WHERE user_id=? AND status='pending'
+                 ORDER BY created_at DESC
+                 LIMIT 1`,
+                [user_id],
+                (err, pendingRows) => {
                   if (err) return res.status(500).json({ msg: "DB error" });
 
-                  res.json({
-                    subscription_id: result.insertId,
-                    amount,
-                    reused: false,
-                  });
+                  /* ♻️ REUSE PENDING SUBSCRIPTION */
+                  if (pendingRows.length > 0) {
+                    const pendingId = pendingRows[0].id;
+
+                    db.query(
+                      `UPDATE user_subscriptions
+                       SET plan_id=?, months=?, amount_paid=?, start_date=?, end_date=?
+                       WHERE id=?`,
+                      [plan_id, baseMonths, amount, start, end, pendingId],
+                      (err) => { if (err) console.error("Failed to update pending sub:", err); }
+                    );
+
+                    return res.json({ subscription_id: pendingId, amount, reused: true });
+                  }
+
+                  /* 5️⃣ CREATE NEW PENDING SUBSCRIPTION */
+                  db.query(
+                    `INSERT INTO user_subscriptions
+                     (user_id, plan_id, months, amount_paid, start_date, end_date, status)
+                     VALUES (?,?,?,?,?,?,'pending')`,
+                    [user_id, plan_id, baseMonths, amount, start, end],
+                    (err, result) => {
+                      if (err) return res.status(500).json({ msg: "DB error" });
+
+                      res.json({ subscription_id: result.insertId, amount, reused: false });
+                    }
+                  );
                 }
               );
             }
