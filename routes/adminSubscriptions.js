@@ -277,18 +277,37 @@ router.get("/users", adminAuth, (req, res) => {
 /* ===============================
    📋 GET ALL SUBSCRIPTION PLANS
 ================================ */
+/* ===============================
+   📋 GET ALL SUBSCRIPTION PLANS
+================================ */
 router.get("/subscription-plans", adminAuth, (req, res) => {
   const sql = `SELECT * FROM subscription_plans ORDER BY created_at DESC`;
   db.query(sql, (err, rows) => {
-    if (err) return res.status(500).json(err);
+    if (err) {
+      console.error(err);
+      return res.status(500).json(err);
+    }
     
-    // Parse the JSON features string back into a real array for the frontend
-    const plansWithFeatures = rows.map(row => ({
-      ...row,
-      features: row.features ? JSON.parse(row.features) : []
-    }));
-    
-    res.json(plansWithFeatures);
+    try {
+      // SAFE PARSE: Checks if it's a string before parsing to prevent server crashes
+      const plansWithFeatures = rows.map(row => {
+        let parsedFeatures = [];
+        if (row.features) {
+          parsedFeatures = typeof row.features === 'string' 
+            ? JSON.parse(row.features) 
+            : row.features;
+        }
+        return {
+          ...row,
+          features: parsedFeatures
+        };
+      });
+      
+      res.json(plansWithFeatures);
+    } catch (parseError) {
+      console.error("JSON Parse Error:", parseError);
+      res.status(500).json({ msg: "Error parsing plan features" });
+    }
   });
 });
 
