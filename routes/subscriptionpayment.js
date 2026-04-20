@@ -18,31 +18,6 @@ const auth = (req, res, next) => {
   });
 };
 
-/* ── Discounted pricing table ──────────────────────────────────
-   Mirrors the frontend exactly so Razorpay always receives the
-   correct discounted amount regardless of what the client sends.
-
-   Monthly plan  → lookup by number of months chosen:
-     1  month  = ₹399
-     2  months = ₹798
-     3  months = ₹999   (3-month deal, saves ₹198)
-     6  months = ₹2,394
-     12 months = ₹3,599 (annual deal, saves ₹1,189)
-
-   Quarterly plan → fixed ₹999
-   Yearly plan    → fixed ₹3,599
-──────────────────────────────────────────────────────────────── */
-const MONTHLY_PRICE = { 1: 399, 2: 798, 3: 999, 6: 2394, 12: 3599 };
-const PLAN_FIXED    = { quarterly: 999, yearly: 3599 };
-
-function calcAmount(plan, months, basePricePerMonth) {
-  if (plan === "monthly") {
-    return MONTHLY_PRICE[months] ?? basePricePerMonth * months;
-  }
-  return PLAN_FIXED[plan] ?? basePricePerMonth * months;
-}
-
-
 /* ==================================================
    USER SUBSCRIPTION DETAILS
 ================================================== */
@@ -79,7 +54,6 @@ router.get("/me", auth, (req, res) => {
   );
 });
 
-
 /* ==================================================
    USER SUBSCRIPTION PAYMENTS
 ================================================== */
@@ -103,22 +77,22 @@ router.get("/payments", auth, (req, res) => {
         console.error(err);
         return res.json([]);
       }
-
       res.json(rows);
     }
   );
 });
 
-
 /* ==================================================
-   1️⃣ CREATE SUBSCRIPTION (PRE-PAY)
+   1️⃣ CREATE SUBSCRIPTION (PRE-PAY) - FULLY DYNAMIC
 ================================================== */
 router.post("/create", auth, (req, res) => {
   const user_id = req.user.id;
-  const { plan, months } = req.body;
+  
+  // Notice we only need the plan_key now. The frontend doesn't dictate the months/price anymore.
+  const { plan_key } = req.body;
 
-  if (!plan || !months) {
-    return res.status(400).json({ msg: "Missing fields" });
+  if (!plan_key) {
+    return res.status(400).json({ msg: "Missing plan key" });
   }
 
   /* 1️⃣ BLOCK IF USER ALREADY HAS ACTIVE SUBSCRIPTION */
@@ -129,10 +103,7 @@ router.post("/create", auth, (req, res) => {
      LIMIT 1`,
     [user_id],
     (err, activeRows) => {
-      if (err) {
-        console.error(err);
-        return res.status(500).json({ msg: "DB error" });
-      }
+      if (err) return res.status(500).json({ msg: "DB error" });
 
       if (activeRows.length > 0) {
         return res.status(400).json({
@@ -140,27 +111,25 @@ router.post("/create", auth, (req, res) => {
         });
       }
 
-      /* 2️⃣ FETCH PLAN DETAILS */
+      /* 2️⃣ FETCH DYNAMIC PLAN DETAILS FROM DB */
       db.query(
-        `SELECT id, base_price
+        `SELECT id, base_price, duration_months
          FROM subscription_plans
          WHERE plan_key=? AND status='active'
          LIMIT 1`,
-        [plan],
+        [plan_key],
         (err, planRows) => {
           if (err || planRows.length === 0) {
-            return res.status(400).json({ msg: "Invalid plan" });
+            return res.status(400).json({ msg: "Invalid or inactive plan" });
           }
 
-          const plan_id        = planRows[0].id;
-          const basePricePerMonth = planRows[0].base_price;
-
-          /* ✅ Use the discount table — NOT base_price × months */
-          const amount = calcAmount(plan, Number(months), basePricePerMonth);
+          const plan_id = planRows[0].id;
+          const amount = planRows[0].base_price; // Secured from DB!
+          const months = planRows[0].duration_months; // Secured from DB!
 
           const start = new Date();
           const end   = new Date();
-          end.setMonth(end.getMonth() + Number(months));
+          end.setMonth(end.getMonth() + months);
 
           /* 3️⃣ CHECK EXISTING PENDING SUBSCRIPTION */
           db.query(
@@ -170,13 +139,9 @@ router.post("/create", auth, (req, res) => {
              LIMIT 1`,
             [user_id],
             (err, pendingRows) => {
-              if (err) {
-                console.error(err);
-                return res.status(500).json({ msg: "DB error" });
-              }
+              if (err) return res.status(500).json({ msg: "DB error" });
 
-              /* ♻️ REUSE PENDING SUBSCRIPTION — update amount in case
-                 the user switched plan/duration before paying */
+              /* ♻️ REUSE PENDING SUBSCRIPTION */
               if (pendingRows.length > 0) {
                 const pendingId = pendingRows[0].id;
 
@@ -204,10 +169,7 @@ router.post("/create", auth, (req, res) => {
                  VALUES (?,?,?,?,?,?,'pending')`,
                 [user_id, plan_id, months, amount, start, end],
                 (err, result) => {
-                  if (err) {
-                    console.error(err);
-                    return res.status(500).json({ msg: "DB error" });
-                  }
+                  if (err) return res.status(500).json({ msg: "DB error" });
 
                   res.json({
                     subscription_id: result.insertId,
@@ -223,7 +185,6 @@ router.post("/create", auth, (req, res) => {
     }
   );
 });
-
 
 /* ==================================================
    2️⃣ PAYMENT SUCCESS (RAZORPAY)
@@ -245,16 +206,12 @@ router.post("/success", auth, (req, res) => {
     [subscription_id, user_id],
     (err, rows) => {
       if (err || rows.length === 0) {
-        return res.status(400).json({
-          msg: "Invalid or already processed subscription",
-        });
+        return res.status(400).json({ msg: "Invalid or already processed subscription" });
       }
 
       /* 2️⃣ PREVENT DUPLICATE PAYMENT */
       db.query(
-        `SELECT id FROM subscription_payments
-         WHERE user_subscription_id=?
-         LIMIT 1`,
+        `SELECT id FROM subscription_payments WHERE user_subscription_id=? LIMIT 1`,
         [subscription_id],
         (err, payRows) => {
           if (payRows.length > 0) {
@@ -268,16 +225,11 @@ router.post("/success", auth, (req, res) => {
              VALUES (?,?,?,?, 'success')`,
             [subscription_id, payment_id, order_id, amount],
             (err) => {
-              if (err) {
-                console.error(err);
-                return res.status(500).json({ msg: "Payment save failed" });
-              }
+              if (err) return res.status(500).json({ msg: "Payment save failed" });
 
               /* 4️⃣ ACTIVATE SUBSCRIPTION */
               db.query(
-                `UPDATE user_subscriptions
-                 SET status='active'
-                 WHERE id=?`,
+                `UPDATE user_subscriptions SET status='active' WHERE id=?`,
                 [subscription_id],
                 () => {
                   /* 5️⃣ GRANT ACCESS */
@@ -292,14 +244,14 @@ router.post("/success", auth, (req, res) => {
                     () => {
                       /* 🔔 NOTIFY ADMIN */
                       db.query(
-                        `SELECT u.name, u.email, sp.title AS plan_title
+                        `SELECT u.name, sp.title AS plan_title
                          FROM users u
                          JOIN user_subscriptions us ON us.id = ?
                          JOIN subscription_plans sp ON sp.id = us.plan_id
                          WHERE u.id = ?`,
                         [subscription_id, user_id],
                         (err, infoRows) => {
-                          const name = (!err && infoRows.length) ? infoRows[0].name       : "A user";
+                          const name = (!err && infoRows.length) ? infoRows[0].name : "A user";
                           const plan = (!err && infoRows.length) ? infoRows[0].plan_title : "a plan";
 
                           createAdminNotification(
@@ -308,7 +260,6 @@ router.post("/success", auth, (req, res) => {
                             `${name} subscribed to ${plan} — ₹${amount}`,
                             subscription_id
                           );
-
                           res.json({ success: true });
                         }
                       );
@@ -323,7 +274,6 @@ router.post("/success", auth, (req, res) => {
     }
   );
 });
-
 
 /* ==================================================
    3️⃣ CHECK ACTIVE SUBSCRIPTION
@@ -349,6 +299,5 @@ router.get("/check", auth, (req, res) => {
     }
   );
 });
-
 
 module.exports = router;

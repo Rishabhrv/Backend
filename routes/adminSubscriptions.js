@@ -274,5 +274,105 @@ router.get("/users", adminAuth, (req, res) => {
   });
 });
 
+/* ===============================
+   📋 GET ALL SUBSCRIPTION PLANS
+================================ */
+router.get("/subscription-plans", adminAuth, (req, res) => {
+  const sql = `SELECT * FROM subscription_plans ORDER BY created_at DESC`;
+  db.query(sql, (err, rows) => {
+    if (err) return res.status(500).json(err);
+    
+    // Parse the JSON features string back into a real array for the frontend
+    const plansWithFeatures = rows.map(row => ({
+      ...row,
+      features: row.features ? JSON.parse(row.features) : []
+    }));
+    
+    res.json(plansWithFeatures);
+  });
+});
+
+/* ===============================
+   ➕ CREATE SUBSCRIPTION PLAN
+================================ */
+router.post("/subscription-plans", adminAuth, (req, res) => {
+  const { plan_key, title, base_price, duration_months, description, status, features } = req.body;
+  const featuresJson = JSON.stringify(features || []);
+
+  const checkSql = `SELECT id FROM subscription_plans WHERE plan_key = ?`;
+  db.query(checkSql, [plan_key], (err, rows) => {
+    if (err) return res.status(500).json(err);
+    if (rows.length > 0) {
+      return res.status(400).json({ msg: `A ${plan_key} plan already exists.` });
+    }
+
+    const insertSql = `
+      INSERT INTO subscription_plans (plan_key, title, base_price, duration_months, description, status, features)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `;
+
+    db.query(
+      insertSql,
+      [plan_key, title, base_price, duration_months, description, status || 'active', featuresJson],
+      (err, result) => {
+        if (err) return res.status(500).json(err);
+        res.json({ success: true, id: result.insertId });
+      }
+    );
+  });
+});
+
+/* ===============================
+   ✏️ UPDATE SUBSCRIPTION PLAN
+================================ */
+router.put("/subscription-plans/:id", adminAuth, (req, res) => {
+  const planId = req.params.id;
+  const { plan_key, title, base_price, duration_months, description, status, features } = req.body;
+  const featuresJson = JSON.stringify(features || []);
+
+  const sql = `
+    UPDATE subscription_plans
+    SET plan_key = ?, title = ?, base_price = ?, duration_months = ?, description = ?, status = ?, features = ?
+    WHERE id = ?
+  `;
+
+  db.query(
+    sql,
+    [plan_key, title, base_price, duration_months, description, status, featuresJson, planId],
+    (err, result) => {
+      if (err) return res.status(500).json(err);
+      res.json({ success: true });
+    }
+  );
+});
+
+/* ===============================
+   🗑 DELETE SUBSCRIPTION PLAN
+================================ */
+router.delete("/subscription-plans/:id", adminAuth, (req, res) => {
+  const planId = req.params.id;
+
+  // 1. Safety Check: Are there users attached to this plan?
+  const checkSql = `SELECT COUNT(*) as count FROM user_subscriptions WHERE plan_id = ?`;
+  
+  db.query(checkSql, [planId], (err, rows) => {
+    if (err) return res.status(500).json(err);
+    
+    // If users are subscribed to this plan, block deletion
+    if (rows[0].count > 0) {
+      return res.status(400).json({ 
+        msg: "Cannot delete this plan because users are currently subscribed to it. Please edit the plan and mark it as 'Inactive' instead." 
+      });
+    }
+
+    // 2. If no users are attached, safe to delete
+    const deleteSql = `DELETE FROM subscription_plans WHERE id = ?`;
+    db.query(deleteSql, [planId], (err, result) => {
+      if (err) return res.status(500).json(err);
+      res.json({ success: true });
+    });
+  });
+});
+
 
 module.exports = router;
