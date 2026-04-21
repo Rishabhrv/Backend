@@ -18,8 +18,7 @@ const auth = (req, res, next) => {
 };
 
 /* ─── HELPERS ───────────────────────────────────────────── */
-const rs  = (n) => `Rs. ${Number(n).toFixed(2)}`;
-
+const rs      = (n) => `Rs. ${Number(n).toFixed(2)}`;
 const fmtDate = (iso) =>
   new Date(iso).toLocaleDateString("en-IN", {
     day: "2-digit", month: "short", year: "numeric",
@@ -39,20 +38,15 @@ router.get("/:orderId/invoice", auth, (req, res) => {
       o.coupon_code,
       o.coupon_discount,
       o.razorpay_payment_id,
-
       p.payment_method,
       p.transaction_id,
       p.amount           AS paid_amount,
-
       oi.product_id,
       oi.quantity,
       oi.price,
       oi.format,
-
       pr.title,
-
       COALESCE(s.shipping_cost, 0) AS shipping_cost,
-
       oa.first_name,
       oa.last_name,
       oa.address,
@@ -61,7 +55,6 @@ router.get("/:orderId/invoice", auth, (req, res) => {
       oa.pincode,
       oa.phone,
       oa.email AS shipping_email
-
     FROM orders o
     JOIN order_items oi        ON oi.order_id    = o.id
     JOIN products pr           ON pr.id          = oi.product_id
@@ -70,7 +63,6 @@ router.get("/:orderId/invoice", auth, (req, res) => {
     LEFT JOIN order_address oa ON oa.order_id    = o.id
     INNER JOIN product_categories pc ON pc.product_id = pr.id
     INNER JOIN categories cat  ON cat.id = pc.category_id AND cat.imprint = 'agclassics'
-
     WHERE o.id = ? AND o.user_id = ?
   `;
 
@@ -80,267 +72,306 @@ router.get("/:orderId/invoice", auth, (req, res) => {
 
     const o     = rows[0];
     const items = rows;
-
-    /* Resolve payment ID from payments table or orders table */
     const txnId = o.transaction_id || o.razorpay_payment_id || "N/A";
 
-    /* ── Document setup ── */
+    /* ── PDFKit: (0,0) = TOP-LEFT, y increases DOWNWARD ── */
     const doc = new PDFDocument({ margin: 0, size: "A4", bufferPages: true });
-
     res.setHeader("Content-Type",        "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="invoice-${orderId}.pdf"`);
     doc.pipe(res);
 
-    /* ── Layout constants ── */
     const PW = 595.28;
     const PH = 841.89;
-    const ML = 48;          // left margin
-    const MR = PW - 48;     // right margin
-    const CW = MR - ML;     // 499 pts usable
+    const ML = 48;
+    const MR = PW - 48;
+    const CW = MR - ML;
 
     /* ── Palette ── */
-    const C_DARK   = "#111827";
-    const C_ACCENT = "#4F46E5";   // indigo
-    const C_MUTED  = "#6B7280";
-    const C_BORDER = "#E5E7EB";
-    const C_ALT    = "#F8FAFC";
-    const C_WHITE  = "#FFFFFF";
-    const C_TEXT   = "#374151";
+    const BG       = "#0a0a0b";
+    const SURFACE  = "#141416";
+    const SURFACE2 = "#1a1a1c";
+    const GOLD     = "#c9a84c";
+    const GOLD_DIM = "#3a3220";
+    const WHITE    = "#f5f0e8";
+    const MUTED    = "#5a5660";
+    const GREEN    = "#4ade80";
+    const GREEN_BG = "#0d2b1a";
+    const RED_SOFT = "#f87171";
 
-    /* ─── util ─── */
-    const hline = (y, color = C_BORDER, w = 0.5) =>
-      doc.save().strokeColor(color).lineWidth(w)
-         .moveTo(ML, y).lineTo(MR, y).stroke().restore();
+    /* ── Drawing helpers — all Y measured from TOP ── */
+    const fillRect = (x, y, w, h, color) =>
+      doc.save().rect(x, y, w, h).fill(color).restore();
 
-    const labelVal = (label, value, lx, vx, y, vw = 180) => {
-      doc.font("Helvetica").fontSize(8).fillColor(C_MUTED)
-         .text(label, lx, y, { lineBreak: false });
-      doc.font("Helvetica-Bold").fontSize(8.5).fillColor(C_DARK)
-         .text(value, vx, y, { width: vw, lineBreak: false });
+    const strokeRect = (x, y, w, h, color, lw = 0.5) =>
+      doc.save().lineWidth(lw).rect(x, y, w, h).stroke(color).restore();
+
+    const hline = (y, color = GOLD_DIM, lw = 0.5, x1 = ML, x2 = MR) =>
+      doc.save().moveTo(x1, y).lineTo(x2, y)
+         .strokeColor(color).lineWidth(lw).stroke().restore();
+
+    const diamond = (cx, cy, size = 3) =>
+      doc.save().fillColor(GOLD)
+         .moveTo(cx, cy - size).lineTo(cx + size, cy)
+         .lineTo(cx, cy + size).lineTo(cx - size, cy)
+         .closePath().fill().restore();
+
+    const dot = (cx, cy, r = 1.3) =>
+      doc.save().circle(cx, cy, r).fill(GOLD).restore();
+
+    /* Text helper — x,y = TOP-LEFT of text block */
+    const t = (text, x, y, opts = {}) => {
+      const { font = "Helvetica", size = 8.5, color = WHITE,
+              align = "left", width = 200 } = opts;
+      doc.save()
+         .font(font).fontSize(size).fillColor(color)
+         .text(String(text), x, y, { width, align, lineBreak: false })
+         .restore();
     };
 
-    /* ══════════════════════════════════════
-       1.  TOP STRIPE  (thin indigo line)
-    ══════════════════════════════════════ */
-    doc.rect(0, 0, PW, 5).fill(C_ACCENT);
+    /* ════════════════════════════════════
+       FULL PAGE BACKGROUND
+    ════════════════════════════════════ */
+    fillRect(0, 0, PW, PH, BG);
 
-    /* ══════════════════════════════════════
-       2.  HEADER
-    ══════════════════════════════════════ */
-    let y = 24;
+    /* Subtle side gutter accents */
+    doc.save().fillColor(GOLD).fillOpacity(0.025).rect(0, 0, 6, PH).fill().restore();
+    doc.save().fillColor(GOLD).fillOpacity(0.025).rect(PW - 6, 0, 6, PH).fill().restore();
 
-    /* Company name */
-    doc.font("Helvetica-Bold").fontSize(20).fillColor(C_DARK)
-       .text("AG Classics", ML, y);
+    /* ════════════════════════════════════
+       TOP GOLD BAR  (y=0)
+    ════════════════════════════════════ */
+    fillRect(0, 0, PW, 4, GOLD);
 
-    doc.font("Helvetica").fontSize(8).fillColor(C_MUTED)
-       .text("www.store.agphbooks.com  ·  editor@agphbooks.com", ML, y + 24);
+    /* Soft glow below bar */
+    for (let i = 0; i < 10; i++) {
+      doc.save().fillColor(GOLD).fillOpacity(0.012 - i * 0.001)
+         .rect(0, 4 + i * 6, PW, 6).fill().restore();
+    }
 
-    /* Invoice badge – top right */
-    const bdgW = 110, bdgH = 30;
-    doc.roundedRect(MR - bdgW, y, bdgW, bdgH, 5).fill(C_ACCENT);
-    doc.font("Helvetica-Bold").fontSize(14).fillColor(C_WHITE)
-       .text("INVOICE", MR - bdgW, y + 8, { width: bdgW, align: "center" });
+    /* ════════════════════════════════════
+       HEADER  (top of page, y=20)
+    ════════════════════════════════════ */
+    let y = 20;
 
-    /* Invoice number under badge */
-    doc.font("Helvetica").fontSize(8).fillColor(C_MUTED)
-       .text(`#${o.order_id}`, MR - bdgW, y + bdgH + 5, { width: bdgW, align: "center" });
+    /* AG monogram box */
+    fillRect(ML, y, 44, 44, GOLD);
+    t("AG", ML, y + 13, { font: "Helvetica-Bold", size: 17, color: BG, align: "center", width: 44 });
 
-    y += 58;
-    hline(y, C_BORDER, 1);
+    /* Company name + tagline */
+    t("AG CLASSICS", ML + 54, y + 10,
+      { font: "Helvetica-Bold", size: 15, color: WHITE, width: 250 });
+    t("www.agclassics.in  ·  support@agclassics.in", ML + 54, y + 29,
+      { font: "Helvetica", size: 7.5, color: WHITE, width: 300 });
 
-    /* ══════════════════════════════════════
-       3.  BILLED-TO  +  ORDER DETAILS  (two columns)
-    ══════════════════════════════════════ */
-    y += 16;
-    const RX = ML + CW * 0.52;  // right column start
+    /* Invoice badge — top right */
+    const bdgW = 118, bdgH = 36;
+    fillRect(MR - bdgW, y, bdgW, bdgH, SURFACE2);
+    strokeRect(MR - bdgW, y, bdgW, bdgH, GOLD, 0.7);
+    t("INVOICE", MR - bdgW, y + 9,
+      { font: "Helvetica-Bold", size: 13, color: GOLD, align: "center", width: bdgW });
+    t(`# ${o.order_id}`, MR - bdgW, y + 25,
+      { font: "Helvetica", size: 7.5, color: WHITE, align: "center", width: bdgW });
 
-    /* ── Left: Billed to ── */
-    doc.font("Helvetica-Bold").fontSize(7).fillColor(C_ACCENT)
-       .text("BILLED TO", ML, y);
+    /* Section divider */
+    y += 56;
+    hline(y, GOLD_DIM, 0.7);
+    diamond(ML, y, 3);
+    diamond(PW / 2, y, 3);
+    diamond(MR, y, 3);
+
+    /* ════════════════════════════════════
+       BILLED TO  +  ORDER DETAILS
+    ════════════════════════════════════ */
+    y += 14;
+    const INFO_TOP = y;
+    const RX = ML + CW * 0.52;
+
+    /* Left — Billed To */
+    t("BILLED TO", ML, y, { font: "Helvetica-Bold", size: 7, color: GOLD, width: 200 });
     y += 13;
 
     const fullName = `${o.first_name || ""} ${o.last_name || ""}`.trim() || "Customer";
-    doc.font("Helvetica-Bold").fontSize(10).fillColor(C_DARK).text(fullName, ML, y);
-    y += 13;
+    t(fullName, ML, y, { font: "Helvetica-Bold", size: 11, color: WHITE, width: CW * 0.46 });
+    y += 14;
 
-    doc.font("Helvetica").fontSize(8.5).fillColor(C_TEXT);
-    if (o.address)        { doc.text(o.address,                              ML, y, { width: CW * 0.48 }); y += 12; }
-    if (o.city)           { doc.text(`${o.city}, ${o.state} – ${o.pincode}`, ML, y); y += 12; }
-    if (o.phone)          { doc.text(`Phone: ${o.phone}`,                    ML, y); y += 12; }
-    if (o.shipping_email) { doc.text(`Email: ${o.shipping_email}`,           ML, y); y += 12; }
+    const addrLines = [
+      o.address,
+      o.city ? `${o.city}, ${o.state} – ${o.pincode}` : null,
+      o.phone ? `Phone: ${o.phone}` : null,
+      o.shipping_email ? `Email: ${o.shipping_email}` : null,
+    ].filter(Boolean);
 
-    /* ── Right: Order info ── */
-    let ry = y - (12 * (4 + (o.address ? 1 : 0))) - 13;  // align with name
-    ry = 98;  // fixed starting Y for right column (below the divider)
+    addrLines.forEach((line) => {
+      t(line, ML, y, { font: "Helvetica", size: 8, color: WHITE, width: CW * 0.46 });
+      y += 12;
+    });
 
-    doc.font("Helvetica-Bold").fontSize(7).fillColor(C_ACCENT)
-       .text("ORDER DETAILS", RX, ry);
+    const leftBottom = y;
+
+    /* Right — Order Details (starts at same INFO_TOP) */
+    let ry = INFO_TOP;
+    t("ORDER DETAILS", RX, ry, { font: "Helvetica-Bold", size: 7, color: GOLD, width: 200 });
     ry += 13;
 
     const details = [
       ["Invoice No.",     `#${o.order_id}`],
       ["Date",            fmtDate(o.created_at)],
       ["Payment Method",  o.payment_method || "Razorpay"],
-      ["Transaction ID",  txnId],
+      ["Transaction ID",  txnId.length > 24 ? txnId.slice(0, 24) + "…" : txnId],
       ["Status",          (o.payment_status || "").toUpperCase()],
     ];
 
     details.forEach(([lbl, val]) => {
-      doc.font("Helvetica").fontSize(8).fillColor(C_MUTED)
-         .text(lbl, RX, ry, { width: 90 });
-      doc.font("Helvetica-Bold").fontSize(8.5).fillColor(C_DARK)
-         .text(val, RX + 95, ry, { width: CW * 0.48 - 95 });
-      ry += 15;
+      t(lbl, RX,      ry, { font: "Helvetica",      size: 7.5, color: WHITE, width: 86 });
+      t(val, RX + 90, ry, {
+        font: "Helvetica-Bold", size: 8,
+        color: lbl === "Status" ? GREEN : WHITE,
+        width: CW * 0.46 - 90,
+      });
+      ry += 14;
     });
 
-    /* Adjust y to the taller of the two columns */
-    y = Math.max(y, ry) + 10;
-    hline(y, C_BORDER, 1);
+    y = Math.max(leftBottom, ry) + 10;
+    hline(y, GOLD_DIM, 0.5);
 
-    /* ══════════════════════════════════════
-       4.  ITEMS TABLE
-    ══════════════════════════════════════ */
+    /* ════════════════════════════════════
+       ITEMS TABLE
+    ════════════════════════════════════ */
     y += 12;
 
-    /* Column layout (x positions, widths) */
-    const C = {
-      no:     { x: ML,       w: 20,  align: "center" },
-      title:  { x: ML + 24,  w: 215, align: "left"   },
-      fmt:    { x: ML + 243, w: 64,  align: "center" },
-      qty:    { x: ML + 311, w: 32,  align: "center" },
-      price:  { x: ML + 347, w: 70,  align: "right"  },
-      total:  { x: ML + 420, w: 79,  align: "right"  },
+      const COL = {
+      no:    { x: ML,       w: 18  },
+      title: { x: ML + 22,  w: 200 },
+      fmt:   { x: ML + 226, w: 62  },
+      qty:   { x: ML + 292, w: 30  },
+      price: { x: ML + 326, w: 72  },
+      total: { x: ML + 397, w: CW - 402 },        // <-- Corrected width
     };
 
+    /* Header row */
     const HDR_H = 22;
-    doc.rect(ML, y, CW, HDR_H).fill(C_DARK);
+    fillRect(ML, y, CW, HDR_H, SURFACE2);
+    hline(y,          GOLD, 0.7);
+    hline(y + HDR_H,  GOLD, 0.7);
 
-    const hdrLabels = [
-      ["#",       C.no],
-      ["Item",    C.title],
-      ["Format",  C.fmt],
-      ["Qty",     C.qty],
-      ["Unit Price", C.price],
-      ["Amount",  C.total],
-    ];
-
-    hdrLabels.forEach(([txt, col]) => {
-      doc.font("Helvetica-Bold").fontSize(7.5).fillColor(C_WHITE)
-         .text(txt, col.x, y + 7, { width: col.w, align: col.align, lineBreak: false });
+    [
+      ["#",          COL.no,    "center"],
+      ["ITEM",       COL.title, "left"],
+      ["FORMAT",     COL.fmt,   "center"],
+      ["QTY",        COL.qty,   "center"],
+      ["UNIT PRICE", COL.price, "right"],
+      ["AMOUNT",     COL.total, "right"],
+    ].forEach(([label, col, align]) => {
+      t(label, col.x, y + 7,
+        { font: "Helvetica-Bold", size: 7, color: GOLD, align, width: col.w });
     });
 
     y += HDR_H;
 
-    /* ── Row renderer ── */
+    /* Item rows */
     items.forEach((item, idx) => {
-      /* Measure title height to determine row height */
-      const titleH = doc.font("Helvetica").fontSize(8.5)
-                        .heightOfString(item.title, { width: C.title.w });
-      const RH = Math.max(24, titleH + 12);
+      const ROW_H = 26;
+      fillRect(ML, y, CW, ROW_H, idx % 2 === 0 ? SURFACE : SURFACE2);
+      if (idx % 2 === 0) fillRect(ML, y, 2, ROW_H, GOLD_DIM);  // left accent
 
-      /* Alternating background */
-      doc.rect(ML, y, CW, RH).fill(idx % 2 === 0 ? C_WHITE : C_ALT);
+      const rowY = y + 9;
+      const amt  = Number(item.price) * Number(item.quantity);
 
-      const midY = y + RH / 2 - 5;
-      const rowAmt = Number(item.price) * Number(item.quantity);
+      t(String(idx + 1),           COL.no.x,    rowY, { size: 8,   color: WHITE,  align: "center", width: COL.no.w });
+      t(item.title,                COL.title.x, rowY, { size: 8.5, color: WHITE,  width: COL.title.w });
+      t(item.format.toUpperCase(), COL.fmt.x,   rowY, { size: 7.5, color: WHITE,  align: "center", width: COL.fmt.w });
+      t(String(item.quantity),     COL.qty.x,   rowY, { size: 8.5, color: WHITE,  align: "center", width: COL.qty.w });
+      t(rs(item.price),            COL.price.x, rowY, { size: 8.5, color: WHITE,  align: "right",  width: COL.price.w });
+      t(rs(amt),                   COL.total.x, rowY, {
+        font: "Helvetica-Bold", size: 8.5, color: WHITE, align: "right", width: COL.total.w,
+      });
 
-      doc.font("Helvetica").fontSize(8.5).fillColor(C_MUTED)
-         .text(idx + 1, C.no.x, midY, { width: C.no.w, align: "center", lineBreak: false });
-
-      /* Title – wrapped */
-      doc.font("Helvetica").fontSize(8.5).fillColor(C_DARK)
-         .text(item.title, C.title.x, y + 6, { width: C.title.w });
-
-      doc.font("Helvetica").fontSize(8).fillColor(C_MUTED)
-         .text(item.format.toUpperCase(), C.fmt.x, midY, { width: C.fmt.w, align: "center", lineBreak: false });
-
-      doc.font("Helvetica").fontSize(8.5).fillColor(C_TEXT)
-         .text(item.quantity, C.qty.x, midY, { width: C.qty.w, align: "center", lineBreak: false });
-
-      doc.font("Helvetica").fontSize(8.5).fillColor(C_TEXT)
-         .text(rs(item.price), C.price.x, midY, { width: C.price.w, align: "right", lineBreak: false });
-
-      doc.font("Helvetica-Bold").fontSize(8.5).fillColor(C_DARK)
-         .text(rs(rowAmt), C.total.x, midY, { width: C.total.w, align: "right", lineBreak: false });
-
-      y += RH;
+      y += ROW_H;
     });
 
-    /* Bottom border of table */
-    doc.rect(ML, y, CW, 1).fill(C_BORDER);
-    y += 14;
+    hline(y, GOLD_DIM, 0.5);
+    y += 16;
 
-    /* ══════════════════════════════════════
-       5.  TOTALS BLOCK  (right side)
-    ══════════════════════════════════════ */
-    const TBLOCK_X  = MR - 220;
-    const LABEL_W   = 110;
-    const VAL_X     = TBLOCK_X + LABEL_W + 8;
-    const VAL_W     = 220 - LABEL_W - 8;
+    /* ════════════════════════════════════
+       TOTALS BLOCK
+    ════════════════════════════════════ */
+    const TX   = MR - 210;
+    const LBLW = 110;
+    const VX   = TX + LBLW + 6;
+    const VW   = 210 - LBLW - 6;
 
-    const subtotal   = Number(o.total_amount)
-                     - Number(o.shipping_cost)
-                     + Number(o.coupon_discount || 0);
+    const subtotal   = Number(o.total_amount) - Number(o.shipping_cost) + Number(o.coupon_discount || 0);
     const shipping   = Number(o.shipping_cost);
     const discount   = Number(o.coupon_discount || 0);
     const grandTotal = Number(o.total_amount);
 
-    const totRow = (lbl, val, bold = false) => {
-      doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(8.5)
-         .fillColor(C_MUTED)
-         .text(lbl, TBLOCK_X, y, { width: LABEL_W, align: "right" });
-      doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(8.5)
-         .fillColor(bold ? C_DARK : C_TEXT)
-         .text(val, VAL_X, y, { width: VAL_W, align: "right" });
+    const totRow = (lbl, val, valColor = WHITE) => {
+      t(lbl, TX,  y, { size: 8.5, color: WHITE,    align: "right", width: LBLW });
+      t(val, VX,  y, { size: 8.5, color: valColor, align: "right", width: VW   });
       y += 16;
     };
 
-    totRow("Subtotal",   rs(subtotal));
-    if (shipping > 0)  totRow("Shipping",                         rs(shipping));
-    if (discount  > 0) totRow(`Coupon (${o.coupon_code || ""})`,  `- ${rs(discount)}`);
+    totRow("Subtotal", rs(subtotal));
+    if (shipping > 0) totRow("Shipping", rs(shipping));
+    if (discount  > 0) totRow(`Coupon (${o.coupon_code || ""})`, `- ${rs(discount)}`, RED_SOFT);
 
-    hline(y, C_BORDER, 0.5);
+    hline(y, GOLD_DIM, 0.5, TX, MR);
     y += 8;
 
-    /* Grand total */
-    doc.rect(TBLOCK_X - 8, y - 4, MR - TBLOCK_X + 8, 28).fill(C_ACCENT);
-    doc.font("Helvetica-Bold").fontSize(9).fillColor(C_WHITE)
-       .text("TOTAL AMOUNT", TBLOCK_X - 8, y + 4, { width: LABEL_W + 8, align: "right" });
-    doc.font("Helvetica-Bold").fontSize(11).fillColor(C_WHITE)
-       .text(rs(grandTotal), VAL_X, y + 3, { width: VAL_W, align: "right" });
+    /* Grand total gold bar */
+    fillRect(TX - 8, y, MR - TX + 8, 30, GOLD);
+    t("TOTAL AMOUNT", TX - 8, y + 9,
+      { font: "Helvetica-Bold", size: 8,  color: BG, align: "right", width: LBLW + 8 });
+    t(rs(grandTotal), VX, y + 8,
+      { font: "Helvetica-Bold", size: 12, color: BG, align: "right", width: VW });
 
-    y += 36;
-
-    /* Payment confirmed badge (left side, same row as totals) */
+    /* Payment confirmed badge — left, vertically centred with grand total bar */
     if (o.payment_status === "success") {
-      doc.roundedRect(ML, y - 36 + 4, 150, 22, 4).fill("#ECFDF5");
-      doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#065F46")
-         .text("✓  Payment Confirmed", ML + 10, y - 36 + 11);
+      fillRect(ML, y + 4, 154, 22, GREEN_BG);
+      strokeRect(ML, y + 4, 154, 22, "#166534", 0.5);
+      t("✓  PAYMENT CONFIRMED", ML, y + 12,
+        { font: "Helvetica-Bold", size: 7.5, color: GREEN, align: "center", width: 154 });
     }
 
-    /* ══════════════════════════════════════
-       6.  THANK-YOU NOTE
-    ══════════════════════════════════════ */
-    y += 10;
-    hline(y, C_BORDER, 1);
-    y += 10;
-    doc.font("Helvetica").fontSize(8).fillColor(C_MUTED)
-       .text(
-         "Thank you for shopping with AG Classics. For any queries, reach us at editor@agphbooks.com",
-         ML, y, { width: CW }
-       );
+    y += 48;
 
-    /* ══════════════════════════════════════
-       7.  FOOTER  (pinned to bottom of page)
-    ══════════════════════════════════════ */
-    doc.rect(0, PH - 30, PW, 30).fill(C_DARK);
-    doc.font("Helvetica").fontSize(7.5).fillColor("#9CA3AF")
+    /* ════════════════════════════════════
+       ORNAMENTAL DIVIDER
+    ════════════════════════════════════ */
+    hline(y, GOLD_DIM, 0.5);
+    diamond(PW / 2, y, 3);
+    dot(PW / 2 - 14, y);
+    dot(PW / 2 + 14, y);
+    y += 14;
+
+    /* ════════════════════════════════════
+       THANK-YOU NOTE
+    ════════════════════════════════════ */
+    t("Thank you for your order. We hope you enjoy your classics.",
+      ML, y, { font: "Helvetica", size: 8, color: WHITE, align: "center", width: CW });
+    y += 12;
+    t("For any queries, write to us at  support@agclassics.in",
+      ML, y, { font: "Helvetica", size: 7.5, color: WHITE, align: "center", width: CW });
+
+    /* ════════════════════════════════════
+       FOOTER  (pinned to page bottom)
+    ════════════════════════════════════ */
+    fillRect(0, PH - 28, PW, 28, SURFACE2);
+    hline(PH - 28, GOLD_DIM, 0.5, 0, PW);
+    t("AG CLASSICS  ·  Computer-generated invoice  ·  No signature required",
+      0, PH - 17, { font: "Helvetica", size: 7, color: WHITE, align: "center", width: PW });
+
+    /* Rotated watermark along left edge */
+    doc.save()
+       .fillColor(GOLD).fillOpacity(0.04)
+       .font("Helvetica-Bold").fontSize(7)
+       .translate(10, PH / 2)
+       .rotate(-90)
        .text(
-         "AG Classics  ·  Computer-generated invoice  ·  No signature required",
-         0, PH - 18,
-         { width: PW, align: "center" }
-       );
+         "AG CLASSICS  ·  LITERARY ARCHIVE  ·  DIGITAL LIBRARY  ·  TIMELESS WORKS",
+         -180, 0, { lineBreak: false }
+       )
+       .restore();
 
     doc.end();
   });

@@ -139,7 +139,40 @@ router.get("/:orderId", auth, (req, res) => {
 });
 
 
+/*
+  GET /api/orders/check-ebook-ownership/:productId
+  Checks if the authenticated user has already purchased the ebook format of a specific product.
+*/
+router.get("/check-ebook-ownership/:productId", auth, async (req, res) => {
+  try {
+    const userId = req.user.id; // Assumes your 'auth' middleware attaches req.user
+    const { productId } = req.params;
 
+    // Look for an order item matching the product and format 'ebook'
+    // tied to a successfully paid order for this user.
+    const query = `
+      SELECT COUNT(oi.id) as count 
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      WHERE o.user_id = ? 
+        AND oi.product_id = ? 
+        AND oi.format = 'ebook' 
+        AND o.payment_status = 'success'
+    `;
+
+    const [rows] = await db.promise().query(query, [userId, productId]);
+
+    // If count > 0, the user owns the ebook
+    res.status(200).json({
+      success: true,
+      owned: rows[0].count > 0
+    });
+
+  } catch (error) {
+    console.error("Check Ownership Error:", error);
+    res.status(500).json({ success: false, message: "Server error checking ownership" });
+  }
+});
 
 
 
