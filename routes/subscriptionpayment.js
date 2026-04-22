@@ -25,19 +25,29 @@ const auth = (req, res, next) => {
 };
 
 /* ==================================================
+   HELPER: LOG SUBSCRIPTION EVENT
+================================================== */
+function logSubscriptionEvent(subscriptionId, action, description = "") {
+  if (!subscriptionId) return;
+  db.query(
+    `INSERT INTO subscription_logs (subscription_id, action, description) VALUES (?, ?, ?)`,
+    [subscriptionId, action, description],
+    (err) => {
+      if (err) console.error("Failed to log subscription event:", err);
+    }
+  );
+}
+
+/* ==================================================
    HELPER: Get or create Razorpay Plan ID for a DB plan
-   Call this once per plan (stores razorpay_plan_id in DB)
 ================================================== */
 async function getRazorpayPlanId(plan) {
-  // If already synced, return it
   if (plan.razorpay_plan_id) return plan.razorpay_plan_id;
 
   const amount = plan.discount_price || plan.base_price;
 
-  // Map duration_months to Razorpay interval
   const intervalMap = { 1: "monthly", 3: "quarterly", 6: "monthly", 12: "yearly" };
   const interval = intervalMap[plan.duration_months] || "monthly";
-  // For multi-month plans that aren't quarterly/yearly, we use interval_count
   const intervalCount = (plan.duration_months === 3) ? 1 : (plan.duration_months === 12) ? 1 : plan.duration_months;
   const rzpInterval = (plan.duration_months === 3) ? "quarterly" : (plan.duration_months === 12) ? "yearly" : "monthly";
 
@@ -46,13 +56,12 @@ async function getRazorpayPlanId(plan) {
     interval: rzpInterval === "quarterly" ? 3 : intervalCount,
     item: {
       name: plan.title,
-      amount: amount * 100, // in paise
+      amount: amount * 100,
       currency: "INR",
       description: plan.description || plan.title,
     },
   });
 
-  // Save back to DB
   await new Promise((resolve, reject) =>
     db.query(
       `UPDATE subscription_plans SET razorpay_plan_id=? WHERE id=?`,
@@ -130,7 +139,6 @@ router.post("/create", auth, async (req, res) => {
   if (!plan_key) return res.status(400).json({ msg: "Missing plan key" });
 
   try {
-    // Block if already active
     const [activeRows] = await new Promise((resolve, reject) =>
       db.query(
         `SELECT id FROM user_subscriptions WHERE user_id=? AND status='active' AND end_date >= CURDATE() LIMIT 1`,
@@ -141,7 +149,6 @@ router.post("/create", auth, async (req, res) => {
     if (activeRows.length > 0)
       return res.status(400).json({ msg: "You already have an active subscription" });
 
-    // Check promo eligibility
     const [historyRows] = await new Promise((resolve, reject) =>
       db.query(
         `SELECT id FROM user_subscriptions WHERE user_id=? AND status IN ('active','expired','cancelled') LIMIT 1`,
@@ -151,7 +158,6 @@ router.post("/create", auth, async (req, res) => {
     );
     const isNewUser = historyRows.length === 0;
 
-    // Fetch plan from DB
     const [planRows] = await new Promise((resolve, reject) =>
       db.query(
         `SELECT id, title, description, base_price, discount_price, duration_months, razorpay_plan_id
@@ -165,10 +171,8 @@ router.post("/create", auth, async (req, res) => {
     const plan = planRows[0];
     const amount = parseFloat(plan.discount_price) || parseFloat(plan.base_price);
 
-    // Get or create Razorpay Plan
     const razorpayPlanId = await getRazorpayPlanId(plan);
 
-    // Fetch user email & name for Razorpay
     const [userRows] = await new Promise((resolve, reject) =>
       db.query(
         `SELECT name, email, phone FROM users WHERE id=? LIMIT 1`,
@@ -178,15 +182,9 @@ router.post("/create", auth, async (req, res) => {
     );
     const user = userRows[0] || {};
 
-    // Calculate total billing cycles
-    // If new user gets 1 free month, we add 1 extra cycle at start via addon OR
-    // simply extend end_date by 1 month and let Razorpay handle billing from cycle 2
-    // Simplest approach: use addons for the promo free month, billing starts after
-    const startAt = Math.floor(Date.now() / 1000) + 60; // starts in 1 minute
-
     const subscriptionPayload = {
       plan_id: razorpayPlanId,
-      total_count: 120, // max cycles (10 years) — cancellation stops it
+      total_count: 12,
       quantity: 1,
       customer_notify: 1,
       notify_info: {
@@ -195,15 +193,12 @@ router.post("/create", auth, async (req, res) => {
       },
     };
 
-    // Create Razorpay Subscription
     const rzpSub = await razorpay.subscriptions.create(subscriptionPayload);
 
-    // Compute initial end_date
     const start = new Date();
     const end = new Date();
     end.setMonth(end.getMonth() + plan.duration_months + (isNewUser ? 1 : 0));
 
-    // Cancel any existing pending subscription for this user
     await new Promise((resolve) =>
       db.query(
         `UPDATE user_subscriptions SET status='cancelled' WHERE user_id=? AND status='pending'`,
@@ -212,7 +207,6 @@ router.post("/create", auth, async (req, res) => {
       )
     );
 
-    // Save pending subscription to DB
     const insertId = await new Promise((resolve, reject) =>
       db.query(
         `INSERT INTO user_subscriptions
@@ -245,7 +239,6 @@ router.post("/success", auth, async (req, res) => {
   if (!subscription_id || !payment_id || !razorpay_subscription_id || !razorpay_signature)
     return res.status(400).json({ msg: "Missing payment data" });
 
-  // ✅ Verify Razorpay signature
   const payload = `${payment_id}|${razorpay_subscription_id}`;
   const expectedSignature = crypto
     .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
@@ -256,7 +249,6 @@ router.post("/success", auth, async (req, res) => {
     return res.status(400).json({ msg: "Payment signature verification failed" });
 
   try {
-    // Verify subscription belongs to user
     const [rows] = await new Promise((resolve, reject) =>
       db.query(
         `SELECT id, user_id, end_date, amount_paid FROM user_subscriptions
@@ -270,7 +262,6 @@ router.post("/success", auth, async (req, res) => {
 
     const sub = rows[0];
 
-    // Prevent duplicate payments
     const [payRows] = await new Promise((resolve, reject) =>
       db.query(
         `SELECT id FROM subscription_payments WHERE user_subscription_id=? LIMIT 1`,
@@ -280,7 +271,6 @@ router.post("/success", auth, async (req, res) => {
     );
     if (payRows.length) return res.json({ success: true, duplicate: true });
 
-    // Save payment record
     await new Promise((resolve, reject) =>
       db.query(
         `INSERT INTO subscription_payments
@@ -291,7 +281,6 @@ router.post("/success", auth, async (req, res) => {
       )
     );
 
-    // Activate subscription
     await new Promise((resolve, reject) =>
       db.query(
         `UPDATE user_subscriptions SET status='active' WHERE id=?`,
@@ -300,7 +289,6 @@ router.post("/success", auth, async (req, res) => {
       )
     );
 
-    // Grant access
     await new Promise((resolve, reject) =>
       db.query(
         `INSERT INTO user_subscription_access
@@ -312,7 +300,9 @@ router.post("/success", auth, async (req, res) => {
       )
     );
 
-    // Notify admin
+    // 📜 LOGGING EVENT
+    logSubscriptionEvent(subscription_id, "ACTIVATED", "Initial subscription activated via Razorpay.");
+
     db.query(
       `SELECT u.name, sp.title AS plan_title FROM users u
        JOIN user_subscriptions us ON us.id=?
@@ -340,15 +330,11 @@ router.post("/success", auth, async (req, res) => {
 
 /* ==================================================
    3️⃣  RAZORPAY WEBHOOK — handles auto-renewals
-   Add this URL in Razorpay Dashboard → Webhooks
-   URL: https://yourdomain.com/api/subscription-payment/webhook
-   Events: subscription.charged, subscription.cancelled, subscription.completed
 ================================================== */
 router.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
   const signature = req.headers["x-razorpay-signature"];
 
-  // ✅ Verify webhook authenticity
   const expectedSig = crypto
     .createHmac("sha256", webhookSecret)
     .update(req.body)
@@ -363,7 +349,6 @@ router.post("/webhook", express.raw({ type: "application/json" }), (req, res) =>
   const { event: eventName, payload } = event;
 
   if (eventName === "subscription.charged") {
-    // Auto-renewal payment succeeded — extend access
     const rzpSubId = payload.subscription?.entity?.id;
     const paymentId = payload.payment?.entity?.id;
     const amountPaid = (payload.payment?.entity?.amount || 0) / 100;
@@ -385,7 +370,6 @@ router.post("/webhook", express.raw({ type: "application/json" }), (req, res) =>
         const newEnd = new Date(currentEnd);
         newEnd.setMonth(newEnd.getMonth() + sub.duration_months);
 
-        // Extend end_date
         db.query(
           `UPDATE user_subscriptions SET end_date=? WHERE id=?`,
           [newEnd, sub.id],
@@ -394,7 +378,6 @@ router.post("/webhook", express.raw({ type: "application/json" }), (req, res) =>
           }
         );
 
-        // Extend access
         db.query(
           `UPDATE user_subscription_access SET expires_at=? WHERE subscription_id=?`,
           [newEnd, sub.id],
@@ -403,7 +386,6 @@ router.post("/webhook", express.raw({ type: "application/json" }), (req, res) =>
           }
         );
 
-        // Log renewal payment
         db.query(
           `INSERT INTO subscription_payments
            (user_subscription_id, gateway_payment_id, gateway_order_id, amount, status)
@@ -414,7 +396,9 @@ router.post("/webhook", express.raw({ type: "application/json" }), (req, res) =>
           }
         );
 
-        // Notify admin
+        // 📜 LOGGING EVENT
+        logSubscriptionEvent(sub.id, "AUTO_RENEWED", `Auto-renewal payment of ₹${amountPaid} successful.`);
+
         createAdminNotification(
           "subscription",
           "Subscription Auto-Renewed",
@@ -429,11 +413,26 @@ router.post("/webhook", express.raw({ type: "application/json" }), (req, res) =>
     const rzpSubId = payload.subscription?.entity?.id;
     if (!rzpSubId) return res.json({ ok: true });
 
+    // First fetch the internal ID to log properly, then update
     db.query(
-      `UPDATE user_subscriptions SET autopay_enabled=0 WHERE razorpay_subscription_id=?`,
+      `SELECT id FROM user_subscriptions WHERE razorpay_subscription_id=? LIMIT 1`, 
       [rzpSubId],
-      (err) => {
-        if (err) console.error("Failed to update autopay status:", err);
+      (err, rows) => {
+        if (!err && rows.length > 0) {
+          const subId = rows[0].id;
+          db.query(
+            `UPDATE user_subscriptions SET autopay_enabled=0 WHERE id=?`,
+            [subId],
+            (err) => {
+              if (err) {
+                console.error("Failed to update autopay status:", err);
+              } else {
+                // 📜 LOGGING EVENT
+                logSubscriptionEvent(subId, "AUTOPAY_DISABLED", "Razorpay webhook reported auto-pay disabled/cancelled.");
+              }
+            }
+          );
+        }
       }
     );
   }
@@ -463,10 +462,8 @@ router.post("/cancel-autopay", auth, async (req, res) => {
 
     const { id, razorpay_subscription_id } = rows[0];
 
-    // Cancel on Razorpay (cancel_at_cycle_end=1 means it won't renew after current period)
     await razorpay.subscriptions.cancel(razorpay_subscription_id, { cancel_at_cycle_end: 1 });
 
-    // Mark autopay as disabled (access remains until end_date)
     await new Promise((resolve, reject) =>
       db.query(
         `UPDATE user_subscriptions SET autopay_enabled=0 WHERE id=?`,
@@ -475,10 +472,97 @@ router.post("/cancel-autopay", auth, async (req, res) => {
       )
     );
 
+    // 📜 LOGGING EVENT
+    logSubscriptionEvent(id, "AUTOPAY_CANCELLED", "User manually cancelled auto-renewal.");
+
     res.json({ success: true, msg: "Autopay cancelled. Your access continues until the current period ends." });
   } catch (err) {
     console.error("Cancel autopay error:", err);
     res.status(500).json({ msg: err.error?.description || "Failed to cancel autopay" });
+  }
+});
+
+/* ==================================================
+   PAUSE AUTOPAY
+================================================== */
+router.post("/pause-autopay", auth, async (req, res) => {
+  const user_id = req.user.id;
+
+  try {
+    const [rows] = await new Promise((resolve, reject) =>
+      db.query(
+        `SELECT id, razorpay_subscription_id FROM user_subscriptions
+         WHERE user_id=? AND status='active' AND autopay_enabled=1
+         ORDER BY created_at DESC LIMIT 1`,
+        [user_id],
+        (err, rows) => (err ? reject(err) : resolve([rows]))
+      )
+    );
+
+    if (!rows.length)
+      return res.status(400).json({ msg: "No active auto-renewing subscription found" });
+
+    const { id, razorpay_subscription_id } = rows[0];
+
+    await razorpay.subscriptions.pause(razorpay_subscription_id, { pause_at: "now" });
+
+    await new Promise((resolve, reject) =>
+      db.query(
+        `UPDATE user_subscriptions SET autopay_enabled=2 WHERE id=?`,
+        [id],
+        (err) => (err ? reject(err) : resolve())
+      )
+    );
+
+    // 📜 LOGGING EVENT
+    logSubscriptionEvent(id, "AUTOPAY_PAUSED", "User manually paused auto-renewal.");
+
+    res.json({ success: true, msg: "Auto-renewal paused successfully. You can resume it anytime." });
+  } catch (err) {
+    console.error("Pause autopay error:", err);
+    res.status(500).json({ msg: err.error?.description || "Failed to pause auto-renewal" });
+  }
+});
+
+/* ==================================================
+   RESUME AUTOPAY
+================================================== */
+router.post("/resume-autopay", auth, async (req, res) => {
+  const user_id = req.user.id;
+
+  try {
+    const [rows] = await new Promise((resolve, reject) =>
+      db.query(
+        `SELECT id, razorpay_subscription_id FROM user_subscriptions
+         WHERE user_id=? AND status='active' AND autopay_enabled=2
+         ORDER BY created_at DESC LIMIT 1`,
+        [user_id],
+        (err, rows) => (err ? reject(err) : resolve([rows]))
+      )
+    );
+
+    if (!rows.length)
+      return res.status(400).json({ msg: "No paused subscription found" });
+
+    const { id, razorpay_subscription_id } = rows[0];
+
+    await razorpay.subscriptions.resume(razorpay_subscription_id, { resume_at: "now" });
+
+    await new Promise((resolve, reject) =>
+      db.query(
+        `UPDATE user_subscriptions SET autopay_enabled=1 WHERE id=?`,
+        [id],
+        (err) => (err ? reject(err) : resolve())
+      )
+    );
+
+    // 📜 LOGGING EVENT
+    logSubscriptionEvent(id, "AUTOPAY_RESUMED", "User resumed auto-renewal.");
+
+    res.json({ success: true, msg: "Auto-renewal resumed successfully." });
+  } catch (err) {
+    console.error("Resume autopay error:", err);
+    res.status(500).json({ msg: err.error?.description || "Failed to resume auto-renewal" });
   }
 });
 

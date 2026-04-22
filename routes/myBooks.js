@@ -60,7 +60,7 @@ router.get("/:slug/read", auth, (req, res) => {
     INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
     WHERE p.slug = ?
       AND (
-        /* 🛒 PURCHASED */
+        /* 🛒 PURCHASED ONLY */
         EXISTS (
           SELECT 1
           FROM orders o
@@ -70,19 +70,12 @@ router.get("/:slug/read", auth, (req, res) => {
             AND oi.product_id = p.id
             AND oi.format = 'ebook'
         )
-        /* 📚 SUBSCRIPTION */
-        OR EXISTS (
-          SELECT 1
-          FROM user_subscription_access usa
-          WHERE usa.user_id = ?
-            AND usa.status = 'active'
-            AND usa.expires_at >= CURDATE()
-        )
       )
     LIMIT 1
   `;
 
-  db.query(sql, [slug, user_id, user_id], (err, rows) => {
+  // Notice we removed the third user_id parameter here
+  db.query(sql, [slug, user_id], (err, rows) => {
     if (err || !rows.length) {
       return res.status(403).json({ msg: "Access denied" });
     }
@@ -111,6 +104,7 @@ router.get("/:slug/meta", auth, (req, res) => {
     INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
     WHERE p.slug = ?
       AND (
+        /* 🛒 PURCHASED ONLY */
         EXISTS (
           SELECT 1
           FROM orders o
@@ -120,18 +114,12 @@ router.get("/:slug/meta", auth, (req, res) => {
             AND oi.product_id = p.id
             AND oi.format = 'ebook'
         )
-        OR EXISTS (
-          SELECT 1
-          FROM user_subscription_access usa
-          WHERE usa.user_id = ?
-            AND usa.status = 'active'
-            AND usa.expires_at >= CURDATE()
-        )
       )
     LIMIT 1
   `;
 
-  db.query(sql, [slug, user_id, user_id], (err, rows) => {
+  // Notice we removed the third user_id parameter here
+  db.query(sql, [slug, user_id], (err, rows) => {
     if (err || !rows.length) {
       return res.status(403).json({ msg: "Access denied" });
     }
