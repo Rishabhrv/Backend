@@ -481,6 +481,18 @@ router.post("/create-order", auth, async (req, res) => {
       )
     );
 
+    // Update the user's phone number in the `users` table ONLY if they don't already have one
+    await new Promise((resolve) => {
+      db.query(
+        `UPDATE users SET phone = ? WHERE id = ? AND (phone IS NULL OR phone = '')`,
+        [address.phone, req.user.id],
+        (err) => {
+          if (err) console.error("Failed to update user phone:", err);
+          resolve(); // Resolve anyway, we don't want to stop the checkout if this minor update fails
+        }
+      );
+    });
+
     if (shipping > 0) {
       await new Promise((resolve) =>
         db.query(

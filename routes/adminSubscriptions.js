@@ -53,6 +53,7 @@ router.get("/subscriptions", adminAuth, (req, res) => {
   });
 });
 
+
 /* ===============================
    📄 SINGLE SUBSCRIPTION DETAIL
 ================================ */
@@ -66,6 +67,8 @@ router.get("/subscriptions/:id", adminAuth, (req, res) => {
       us.start_date,
       us.end_date,
       us.status,
+      us.razorpay_subscription_id,   -- Added
+      us.autopay_enabled,            -- Added
 
       u.id AS user_id,
       u.name,
@@ -90,6 +93,25 @@ router.get("/subscriptions/:id", adminAuth, (req, res) => {
       return res.status(404).json({ msg: "Subscription not found" });
 
     res.json(rows[0]);
+  });
+});
+
+/* ===============================
+   📜 GET SUBSCRIPTION LOGS
+================================ */
+router.get("/subscriptions/:id/logs", adminAuth, (req, res) => {
+  const subscriptionId = req.params.id;
+
+  const sql = `
+    SELECT id, action, description, created_at 
+    FROM subscription_logs 
+    WHERE subscription_id = ? 
+    ORDER BY created_at DESC
+  `;
+
+  db.query(sql, [subscriptionId], (err, rows) => {
+    if (err) return res.status(500).json(err);
+    res.json(rows);
   });
 });
 
