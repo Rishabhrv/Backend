@@ -182,6 +182,7 @@ router.post("/:slug/progress", auth, (req, res) => {
   });
 });
 
+
 /* ===============================================
    5️⃣  CONTINUE READING  (agclassics only)
 =============================================== */
@@ -197,19 +198,26 @@ router.get("/continue", auth, (req, res) => {
     FROM ebook_progress ep
     JOIN ebooks e   ON e.id = ep.ebook_id
     JOIN products p ON p.id = e.product_id
-    JOIN product_categories pc ON pc.product_id = p.id
-    JOIN categories cat ON cat.id = pc.category_id
-    WHERE ep.user_id  = ?
-      AND cat.imprint = 'agclassics'          -- ✅ agclassics only
-      AND cat.status  = 'active'
-      AND p.status    = 'published'
-    GROUP BY p.id                             -- one row per book even if multi-category
+    WHERE ep.user_id = ?
+      AND p.status = 'published'
+      -- ✅ Using EXISTS prevents duplicates without needing GROUP BY
+      AND EXISTS (
+          SELECT 1 
+          FROM product_categories pc
+          JOIN categories cat ON cat.id = pc.category_id
+          WHERE pc.product_id = p.id
+            AND cat.imprint = 'agclassics'
+            AND cat.status = 'active'
+      )
     ORDER BY ep.updated_at DESC
     LIMIT 10
   `;
 
   db.query(sql, [req.user.id], (err, rows) => {
-    if (err) return res.json([]);
+    if (err) {
+      console.error("Continue Reading API Error:", err); // 👈 Always log the error for debugging!
+      return res.status(500).json([]);
+    }
     res.json(rows);
   });
 });

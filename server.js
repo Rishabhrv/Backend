@@ -40,6 +40,7 @@ app.use("/api/admin", require("./routes/adminSubscriptions"));
 app.use("/api/admin", require("./routes/adminCoupons"));
 app.use("/api/admin", require("./routes/adminads"));
 app.use("/api/admin", require("./routes/adminPayments"));
+app.use("/api/admin/permissions", require("./routes/adminPermissions"));
 app.use("/api/subjects", require("./routes/subjects"));
 app.use("/api/mylibrary", require("./routes/mylibrary"));
 app.use("/api/payment-history", require("./routes/payment-history"));
