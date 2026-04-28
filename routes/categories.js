@@ -28,13 +28,13 @@ router.get("/", (req, res) => {
 });
 
 
-
-/* ================= GET PRODUCTS BY CATEGORY SLUG ================= */
+/* ================= GET PRODUCTS BY CATEGORY SLUG (INCLUDING SUBCATEGORIES) ================= */
 router.get("/:slug/products", (req, res) => {
   const { slug } = req.params;
   const { product_type, limit } = req.query;
 
-  const params = [slug];
+  // We pass the slug twice: once for the exact category, once to find the parent's ID
+  const params = [slug, slug];
   let typeFilter = "";
 
   if (product_type === "ebook") {
@@ -45,8 +45,10 @@ router.get("/:slug/products", (req, res) => {
 
   const limitClause = limit ? `LIMIT ${parseInt(limit)}` : "";
 
+  // Added DISTINCT to prevent duplicates if a product is in both parent & child
+  // Added p.created_at to SELECT to ensure ORDER BY works perfectly with DISTINCT
   const sql = `
-    SELECT 
+    SELECT DISTINCT
       p.id,
       p.title,
       p.slug,
@@ -57,12 +59,16 @@ router.get("/:slug/products", (req, res) => {
       p.stock,
       p.product_type,
       p.status,
-      p.main_image
+      p.main_image,
+      p.created_at
     FROM products p
     JOIN product_categories pc ON pc.product_id = p.id
     JOIN categories c ON c.id = pc.category_id
     LEFT JOIN ebooks e ON e.product_id = p.id
-    WHERE c.slug = ?
+    WHERE (
+        c.slug = ? 
+        OR c.parent_id = (SELECT id FROM categories WHERE slug = ?)
+      )
       AND p.status = 'published'
       ${typeFilter}
     ORDER BY p.created_at DESC
@@ -77,7 +83,6 @@ router.get("/:slug/products", (req, res) => {
     res.json(rows);
   });
 });
-
 
 /* ADD CATEGORY */
 router.post("/", (req, res) => {
