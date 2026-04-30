@@ -36,53 +36,58 @@ const UNIFIED_MAP = {
 /* ════════════════════════════════════════════════════════
    AGPH EMAIL TEMPLATE  (light theme — existing)
 ════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════
+   NEW AGPH EMAIL TEMPLATE (Refined Light Theme)
+════════════════════════════════════════════════════════ */
 function agphEmailTemplate(unifiedStatus, customer, order, tracking, courier, items = []) {
+  const ACCENT = "#2563eb"; // Royal Blue
+  const BG_SOFT = "#f8fafc";
+  const TEXT_MAIN = "#1e293b";
+  const TEXT_MUTED = "#64748b";
+
   const statusConfig = {
     confirmed: {
-      subject:  `Order #${order.id} Confirmed — Thank you, ${customer.name}!`,
+      subject:  `Order #${order.id} Confirmed — AGPH Books`,
       headline: "Order Confirmed",
-      emoji:    "🎉",
+      emoji:    "✅",
       body:     items.length > 0 && items.every(i => i.format === "ebook")
-        ? `Your eBook order is confirmed! Your purchase is now available — you can access your eBooks from your account. Thank you for shopping with us!`
-        : `We've received your order and it's now being processed. You'll get another update once it ships.`,
-      accent:   "#2563eb",
+        ? `Your digital library is ready! Your eBook purchase is confirmed and available for immediate reading in your account.`
+        : `Your order has been received and is being prepared for shipment. We'll notify you the moment it leaves our warehouse.`,
+      accent:   ACCENT,
       badge:    "CONFIRMED",
     },
     shipped: {
-      subject:  `Order #${order.id} has been Shipped!`,
-      headline: "Your Order is On Its Way",
+      subject:  `Your order #${order.id} is on the way!`,
+      headline: "Order Dispatched",
       emoji:    "📦",
-      body:     `Your order has been handed over to <strong>${courier || "our courier partner"}</strong>.${
-                  tracking ? ` Track it using ID <strong>${tracking}</strong>.` : ""
+      body:     `Great news! Your package has been handed over to <strong>${courier || "our courier partner"}</strong>.${
+                  tracking ? ` You can track your journey with ID: <strong>${tracking}</strong>.` : ""
                 }`,
       accent:   "#7c3aed",
       badge:    "SHIPPED",
     },
     out_for_delivery: {
-      subject:  `Order #${order.id} is Out for Delivery!`,
-      headline: "Out for Delivery",
+      subject:  `Out for delivery: Order #${order.id}`,
+      headline: "Arriving Today",
       emoji:    "🚚",
-      body:     `Your package is almost there! It's out for delivery and will arrive today. Please be available to receive it.`,
-      accent:   "#d97706",
+      body:     `Your AGPH package is with the delivery agent and will reach your doorstep today.`,
+      accent:   "#ca8a04",
       badge:    "OUT FOR DELIVERY",
     },
     delivered: {
-      subject:  `Order #${order.id} Delivered Successfully`,
-      headline: "Delivered!",
-      emoji:    "🎊",
-      body:     `Your order has been delivered successfully. We hope you love your purchase! Reach out if you have any concerns.`,
+      subject:  `Delivered: Order #${order.id}`,
+      headline: "Package Delivered",
+      emoji:    "✨",
+      body:     `Your order has been successfully delivered. We hope you enjoy your new books!`,
       accent:   "#16a34a",
       badge:    "DELIVERED",
     },
     cancelled: {
-      subject:  `Order #${order.id} Has Been Cancelled`,
+      subject:  `Update on Order #${order.id}`,
       headline: "Order Cancelled",
-      emoji:    "❌",
-      body:     `We're sorry — your order <strong>#${order.id}</strong> has been cancelled. If you think this is a mistake, please contact our support team.${
-                  order.total_amount > 0
-                    ? ` Any amount paid will be refunded within <strong>5–7 business days</strong>.`
-                    : ""}`,
-      accent:   "#dc2626",
+      emoji:    "✉️",
+      body:     `Your order <strong>#${order.id}</strong> has been cancelled. If you didn't request this, please contact our support immediately.`,
+      accent:   "#e11d48",
       badge:    "CANCELLED",
     },
   };
@@ -90,147 +95,94 @@ function agphEmailTemplate(unifiedStatus, customer, order, tracking, courier, it
   const cfg = statusConfig[unifiedStatus];
   if (!cfg) return null;
 
-  /* ── Item rows ── */
+  /* ── Item Rows ── */
   const itemRowsHTML = items.map((item) => {
-    const badge = item.format === "ebook"
-      ? `<span style="background:#ede9fe;color:#7c3aed;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;letter-spacing:0.05em;text-transform:uppercase;">eBook</span>`
-      : `<span style="background:#dcfce7;color:#15803d;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;letter-spacing:0.05em;text-transform:uppercase;">Paperback</span>`;
-    const lineTotal = `₹${(Number(item.price) * Number(item.quantity)).toFixed(2)}`;
+    const isEbook = item.format === "ebook";
+    const badgeStyle = isEbook 
+      ? `background:#eff6ff; color:#2563eb;` 
+      : `background:#f1f5f9; color:#475569;`;
+    
     return `
       <tr>
-        <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;">
-          <div>
-            <p style="margin:0 0 5px;font-size:13px;font-weight:700;color:#0f172a;line-height:1.4;">${item.title}</p>
-            ${badge}
-          </div>
+        <td style="padding:16px; border-bottom:1px solid #f1f5f9;">
+          <p style="margin:0; font-size:14px; font-weight:600; color:${TEXT_MAIN};">${item.title}</p>
+          <span style="display:inline-block; margin-top:4px; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:700; text-transform:uppercase; ${badgeStyle}">${item.format}</span>
         </td>
-        <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;text-align:center;font-size:13px;color:#64748b;font-weight:600;white-space:nowrap;">× ${item.quantity}</td>
-        <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;text-align:right;font-size:13px;font-weight:800;color:#0f172a;white-space:nowrap;">${lineTotal}</td>
+        <td style="padding:16px; border-bottom:1px solid #f1f5f9; text-align:center; font-size:14px; color:${TEXT_MUTED};">x${item.quantity}</td>
+        <td style="padding:16px; border-bottom:1px solid #f1f5f9; text-align:right; font-size:14px; font-weight:700; color:${TEXT_MAIN};">₹${(item.price * item.quantity).toFixed(2)}</td>
       </tr>`;
   }).join("");
 
-  const itemsTableHTML = items.length > 0 ? `
-    <table width="100%" cellpadding="0" cellspacing="0"
-      style="border:2px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:24px;border-collapse:separate;border-spacing:0;">
-      <thead>
-        <tr style="background:#0f172a;">
-          <td style="padding:12px 16px;font-size:10px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:0.1em;">Item</td>
-          <td style="padding:12px 16px;font-size:10px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:0.1em;text-align:center;">Qty</td>
-          <td style="padding:12px 16px;font-size:10px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:0.1em;text-align:right;">Total</td>
-        </tr>
-      </thead>
-      <tbody style="background:#ffffff;">${itemRowsHTML}</tbody>
-    </table>` : "";
-
-  const orderDate = order.created_at
-    ? new Date(order.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-    : "";
-  const subtotal     = items.reduce((sum, i) => sum + Number(i.price) * Number(i.quantity), 0);
-  const shippingCost = Number(order.shipping_cost || 0);
-
-  const summaryRows = [
-    orderDate && `<tr><td style="font-size:12px;color:#64748b;padding:6px 0;font-weight:500;">Order Date</td><td style="font-size:12px;color:#0f172a;font-weight:700;text-align:right;">${orderDate}</td></tr>`,
-    courier   && `<tr><td style="font-size:12px;color:#64748b;padding:6px 0;font-weight:500;">Courier</td><td style="font-size:12px;color:#0f172a;font-weight:700;text-align:right;">${courier}</td></tr>`,
-    tracking  && `<tr><td style="font-size:12px;color:#64748b;padding:6px 0;font-weight:500;">Tracking ID</td><td style="font-size:12px;color:#0f172a;font-weight:700;text-align:right;font-family:monospace;">${tracking}</td></tr>`,
-    `<tr><td style="font-size:12px;color:#64748b;padding:6px 0;font-weight:500;">Subtotal</td><td style="font-size:12px;color:#0f172a;font-weight:700;text-align:right;">₹${subtotal.toFixed(2)}</td></tr>`,
-    `<tr><td style="font-size:12px;color:#64748b;padding:6px 0;font-weight:500;">Shipping</td><td style="font-size:12px;color:#0f172a;font-weight:700;text-align:right;">${shippingCost > 0 ? `₹${shippingCost.toFixed(2)}` : "Free"}</td></tr>`,
-  ].filter(Boolean).join("");
-
-  const summaryHTML = `
-    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;border-collapse:collapse;">
-      <tr><td style="background:#0f172a;border-radius:10px 10px 0 0;padding:12px 20px;">
-        <p style="margin:0;font-size:10px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:0.12em;">Order Summary</p>
-      </td></tr>
-      <tr><td style="background:#f8fafc;border:2px solid #e2e8f0;border-top:none;border-radius:0 0 10px 10px;padding:16px 20px;">
-        <table width="100%" cellpadding="0" cellspacing="0">
-          <tr>
-            <td style="font-size:12px;color:#64748b;padding:6px 0;font-weight:500;">Order ID</td>
-            <td style="font-size:12px;color:#0f172a;font-weight:800;text-align:right;font-family:monospace;">#${order.id}</td>
-          </tr>
-          ${summaryRows}
-          <tr><td colspan="2" style="padding:10px 0 4px;"><div style="border-top:2px solid #e2e8f0;"></div></td></tr>
-          <tr>
-            <td style="font-size:15px;font-weight:800;color:#0f172a;padding:4px 0;">Total Paid</td>
-            <td style="font-size:15px;font-weight:800;color:${cfg.accent};text-align:right;">₹${order.total_amount}</td>
-          </tr>
-        </table>
-      </td></tr>
-    </table>`;
-
-  const cancelNoteHTML = unifiedStatus === "cancelled" ? `
-    <table width="100%" cellpadding="0" cellspacing="0"
-      style="background:#fef2f2;border-left:4px solid #dc2626;border-radius:6px;margin-bottom:24px;border-collapse:collapse;">
-      <tr><td style="padding:16px 20px;">
-        <p style="margin:0 0 6px;font-size:12px;font-weight:800;color:#991b1b;text-transform:uppercase;letter-spacing:0.08em;">Cancellation Notice</p>
-        <p style="margin:0;font-size:13px;color:#7f1d1d;line-height:1.7;">
-          If a payment was made, a refund will be processed within <strong>5–7 business days</strong>.<br>
-          Questions? Email us at <a href="mailto:editor@agphbooks.com" style="color:#dc2626;font-weight:700;">editor@agphbooks.com</a>
-        </p>
-      </td></tr>
-    </table>` : "";
+  const orderDate = order.created_at ? new Date(order.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "";
+  const subtotal = items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
 
   return {
     subject: cfg.subject,
-    html: `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${cfg.subject}</title></head>
-<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 0;">
-    <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0"
-        style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
-        <!-- HEADER -->
-        <tr><td style="background:#0f172a;padding:0;">
-          <div style="height:5px;background:${cfg.accent};"></div>
-          <table width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:28px 36px 24px;">
-            <p style="margin:0 0 20px;font-size:22px;font-weight:900;color:#ffffff;letter-spacing:-0.5px;">AGPH <span style="color:${cfg.accent};">Books</span></p>
-            <table cellpadding="0" cellspacing="0"><tr>
-              <td style="background:${cfg.accent};padding:5px 14px;border-radius:6px;">
-                <span style="font-size:10px;font-weight:800;color:#ffffff;letter-spacing:0.15em;">${cfg.badge}</span>
-              </td>
-            </tr></table>
-            <p style="margin:16px 0 4px;font-size:26px;font-weight:900;color:#ffffff;letter-spacing:-0.5px;line-height:1.2;">${cfg.emoji} ${cfg.headline}</p>
-            <p style="margin:0;font-size:12px;color:#64748b;font-family:monospace;">Order #${order.id}</p>
-          </td></tr></table>
-        </td></tr>
-        <!-- BODY -->
-        <tr><td style="padding:15px;">
-          <p style="margin:0 0 8px;font-size:16px;font-weight:800;color:#0f172a;">Hello, ${customer.name} 👋</p>
-          <p style="margin:0 0 32px;font-size:14px;color:#475569;line-height:1.8;">${cfg.body}</p>
-          ${cancelNoteHTML}
-          ${itemsTableHTML}
-          ${summaryHTML}
-          <div style="border-top:2px solid #f1f5f9;margin:24px 0;"></div>
-          ${unifiedStatus === "delivered" ? `
-          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;border-collapse:collapse;">
-            <tr><td style="background:#f8fafc;border:2px solid #e2e8f0;border-radius:10px;padding:24px 20px;text-align:center;">
-              <p style="margin:0 0 4px;font-size:20px;">⭐⭐⭐⭐⭐</p>
-              <p style="margin:8px 0 4px;font-size:15px;font-weight:800;color:#0f172a;">How was your order?</p>
-              <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.7;">Your review helps other readers find great books.</p>
-              <a href="${process.env.NEXT_PUBLIC_SITE_URL}/account/orders/${order.id}/review"
-                style="display:inline-block;background:#0f172a;color:#ffffff;font-size:13px;font-weight:800;padding:12px 32px;border-radius:8px;text-decoration:none;">✍️ Write a Review</a>
-            </td></tr>
-          </table>` : ""}
-          <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.8;">
-            Need help? <a href="mailto:editor@agphbooks.com" style="color:${cfg.accent};font-weight:700;text-decoration:none;">editor@agphbooks.com</a>
-          </p>
-        </td></tr>
-        <!-- FOOTER -->
-        <tr><td style="background:#0f172a;padding:24px 36px;">
-          <table width="100%" cellpadding="0" cellspacing="0"><tr>
-            <td>
-              <p style="margin:0 0 4px;font-size:13px;font-weight:800;color:#ffffff;">AGPH Books Store</p>
-              <p style="margin:0;font-size:11px;color:#475569;">© ${new Date().getFullYear()} All rights reserved.</p>
-            </td>
-            <td align="right" style="vertical-align:middle;">
-              <a href="mailto:editor@agphbooks.com" style="font-size:11px;color:#64748b;text-decoration:none;font-weight:600;">editor@agphbooks.com</a>
-            </td>
-          </tr></table>
-        </td></tr>
+    html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+    .header { background: ${BG_SOFT}; padding: 40px 30px; text-align: center; border-bottom: 1px solid #e2e8f0; }
+    .content { padding: 40px 30px; }
+    .footer { background: ${TEXT_MAIN}; padding: 30px; text-align: center; color: #94a3b8; font-size: 12px; }
+    .button { display: inline-block; padding: 12px 24px; background: ${cfg.accent}; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 700; font-size: 14px; }
+  </style>
+</head>
+<body style="margin:0; padding:20px; background-color:#f1f5f9; font-family:'Inter', system-ui, sans-serif;">
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div style="font-size:24px; font-weight:800; color:${TEXT_MAIN}; letter-spacing:-0.5px; margin-bottom:10px;">AGPH <span style="color:${cfg.accent}">BOOKS</span></div>
+      <div style="display:inline-block; padding:4px 12px; background:${cfg.accent}15; color:${cfg.accent}; border-radius:20px; font-size:11px; font-weight:800; letter-spacing:1px; margin-bottom:20px;">${cfg.badge}</div>
+      <h1 style="margin:0; font-size:28px; color:${TEXT_MAIN};">${cfg.emoji} ${cfg.headline}</h1>
+    </div>
+
+    <!-- Body -->
+    <div class="content">
+      <p style="font-size:16px; color:${TEXT_MAIN}; font-weight:600; margin-top:0;">Hello ${customer.name},</p>
+      <p style="font-size:15px; color:${TEXT_MUTED}; line-height:1.6; margin-bottom:30px;">${cfg.body}</p>
+
+      <!-- Items Table -->
+      <table width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e2e8f0; border-radius:8px; border-collapse:separate; overflow:hidden;">
+        <tr style="background:${BG_SOFT};">
+          <th align="left" style="padding:12px 16px; font-size:11px; color:${TEXT_MUTED}; text-transform:uppercase;">Product</th>
+          <th align="center" style="padding:12px 16px; font-size:11px; color:${TEXT_MUTED}; text-transform:uppercase;">Qty</th>
+          <th align="right" style="padding:12px 16px; font-size:11px; color:${TEXT_MUTED}; text-transform:uppercase;">Price</th>
+        </tr>
+        ${itemRowsHTML}
       </table>
-    </td></tr>
-  </table>
-</body></html>`,
+
+      <!-- Summary -->
+      <div style="margin-top:24px; padding:20px; background:${BG_SOFT}; border-radius:8px;">
+        <table width="100%">
+          <tr><td style="font-size:14px; color:${TEXT_MUTED};">Order ID</td><td align="right" style="font-size:14px; font-weight:700; color:${TEXT_MAIN};">#${order.id}</td></tr>
+          ${orderDate ? `<tr><td style="font-size:14px; color:${TEXT_MUTED}; padding-top:8px;">Date</td><td align="right" style="font-size:14px; font-weight:700; color:${TEXT_MAIN}; padding-top:8px;">${orderDate}</td></tr>` : ''}
+          <tr><td colspan="2" style="border-top:1px solid #e2e8f0; margin:12px 0; padding-top:12px;"></td></tr>
+          <tr><td style="font-size:16px; font-weight:700; color:${TEXT_MAIN};">Total Amount</td><td align="right" style="font-size:18px; font-weight:800; color:${cfg.accent};">₹${order.total_amount}</td></tr>
+        </table>
+      </div>
+
+      ${unifiedStatus === 'delivered' ? `
+      <div style="text-align:center; margin-top:30px;">
+        <p style="font-size:14px; color:${TEXT_MUTED}; margin-bottom:15px;">How was your experience?</p>
+        <a href="${process.env.NEXT_PUBLIC_SITE_URL}/account/orders/${order.id}/review" class="button">Write a Review</a>
+      </div>` : ''}
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <p style="margin:0 0 10px; font-weight:700; color:#ffffff;">AGPH Books Store</p>
+      <p style="margin:0;">You are receiving this because you made a purchase at store.agphbooks.com</p>
+      <div style="margin-top:20px; border-top:1px solid #334155; padding-top:20px;">
+        <a href="mailto:editor@agphbooks.com" style="color:${cfg.accent}; text-decoration:none;">Contact Support</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`,
   };
 }
 

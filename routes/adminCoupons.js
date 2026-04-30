@@ -222,8 +222,17 @@ router.delete("/coupons/:id", adminAuth, (req, res) => {
     `DELETE FROM coupons WHERE id = ?`,
     [req.params.id],
     (err) => {
-      if (err) return res.status(500).json(err);
-      res.json({ msg: "Coupon deleted" });
+      if (err) {
+        // If it's blocked by the coupon_usage table (Foreign Key constraint)
+        if (err.code === 'ER_ROW_IS_REFERENCED_2' || err.code === 'ER_ROW_IS_REFERENCED') {
+          return res.status(400).json({ 
+            msg: "Cannot delete this coupon because it has already been used by customers." 
+          });
+        }
+        // Generic fallback error
+        return res.status(500).json({ msg: "Failed to delete coupon." });
+      }
+      res.json({ msg: "Coupon deleted successfully." });
     }
   );
 });
