@@ -48,6 +48,39 @@ router.get("/users", adminAuth, (req, res) => {
   );
 });
 
+
+/* POST create new user */
+router.post("/users", adminAuth, async (req, res) => {
+  const { name, email, phone, role, status, password } = req.body;
+
+  if (!name || !email || !password) {
+    return res.status(400).json({ msg: "Name, email, and password are required" });
+  }
+
+  try {
+    // Hash the password securely
+    const hashedPw = await bcrypt.hash(password, 10);
+    
+    // Insert into DB with default provider as 'local'
+    db.query(
+      `INSERT INTO users (name, email, phone, role, status, password, provider)
+       VALUES (?, ?, ?, ?, ?, ?, 'local')`,
+      [name, email, phone || null, role || 'customer', status || 'active', hashedPw],
+      (err, result) => {
+        if (err) {
+          if (err.code === "ER_DUP_ENTRY") {
+            return res.status(400).json({ msg: "A user with this email already exists" });
+          }
+          return res.status(500).json({ msg: "Failed to create user" });
+        }
+        res.status(201).json({ msg: "User created successfully", id: result.insertId });
+      }
+    );
+  } catch (err) {
+    res.status(500).json({ msg: "Server error" });
+  }
+});
+
 /* GET single user */
 router.get("/users/:id", adminAuth, (req, res) => {
   db.query(
