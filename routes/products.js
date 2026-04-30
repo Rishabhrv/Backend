@@ -422,7 +422,8 @@ router.post(
       width,
       height,
       ebook_price,
-      ebook_sell_price
+      ebook_sell_price,
+      book_id
     } = req.body;
 
     const imagePath = req.files.image
@@ -433,13 +434,13 @@ router.post(
 
     const productSql = `
       INSERT INTO products
-      (title, slug, description, price, sell_price, stock, sku, product_type, status, main_image)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (title, slug, description, price, sell_price, stock, sku, product_type, status, main_image, book_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     db.query(
       productSql,
-      [title, slug, description, price, sell_price, stock, sku, product_type, status, imagePath],
+      [title, slug, description, price, sell_price, stock, sku, product_type, status, imagePath, book_id || null],
       (err, result) => {
         if (err) return res.status(500).json({ message: err.message });
 
@@ -948,6 +949,7 @@ router.get("/:id", (req, res) => {
   const sql = `
     SELECT 
       p.id,
+      p.book_id,
       p.title,
       p.slug,
       p.description,
@@ -1061,6 +1063,7 @@ router.put(
       authors,
       ebook_price,
       ebook_sell_price,
+      book_id,
     } = req.body;
 
     /* ---------------- UPDATE PRODUCT ---------------- */
@@ -1078,14 +1081,15 @@ router.put(
         stock = ?,
         sku = ?,
         product_type = ?,
-        status = ?
+        status = ?,
+        book_id = ?
         ${imagePath ? ", main_image = ?" : ""}
       WHERE id = ?
     `;
 
     const params = imagePath
-      ? [title, slug, description, price, sell_price, stock, sku, product_type, status, imagePath, id]
-      : [title, slug, description, price, sell_price, stock, sku, product_type, status, id];
+      ? [title, slug, description, price, sell_price, stock, sku, product_type, status, book_id || null, imagePath, id]
+      : [title, slug, description, price, sell_price, stock, sku, product_type, status, book_id || null, id];
 
 // ── CHECK STOCK BEFORE UPDATING ──────────────────────────────────
 db.query(`SELECT stock FROM products WHERE id = ?`, [id], (err, stockRows) => {
@@ -1521,7 +1525,8 @@ router.post("/convert-doc", upload.single("file"), (req, res) => {
     ebook_sell_price,
     meta_title,
     meta_description,
-    keywords
+    keywords,
+    book_id
   } = req.body;
 
   const categories = JSON.parse(req.body.categories || "[]");
@@ -1675,8 +1680,8 @@ if (isEdit) {
 
     db.query(
       `INSERT INTO products
-      (title, slug, description, price, sell_price, stock, sku, product_type, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (title, slug, description, price, sell_price, stock, sku, product_type, status, book_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         title,
         finalSlug,
@@ -1686,7 +1691,8 @@ if (isEdit) {
         stock || null,
         sku || null,
         product_type,
-        "draft"
+        "draft",
+        book_id || null
       ],
       (err, result) => {
         if (err) return res.status(500).json({ message: err.message });
