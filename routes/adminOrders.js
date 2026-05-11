@@ -70,7 +70,7 @@ function agphEmailTemplate(unifiedStatus, customer, order, tracking, courier, it
       subject:  `Out for delivery: Order #${order.id}`,
       headline: "Arriving Today",
       emoji:    "🚚",
-      body:     `Your AGPH package is with the delivery agent and will reach your doorstep today.`,
+      body:     `Your package is with the delivery agent and will reach your doorstep today.`,
       accent:   "#ca8a04",
       badge:    "OUT FOR DELIVERY",
     },
