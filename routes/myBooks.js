@@ -98,8 +98,9 @@ router.get("/:slug/meta", auth, (req, res) => {
   const { slug } = req.params;
 
   const sql = `
-    SELECT p.title
+    SELECT p.title, p.main_image, e.ebook_cover
     FROM products p
+    LEFT JOIN ebooks e ON e.product_id = p.id
     INNER JOIN product_categories pc ON pc.product_id = p.id
     INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
     WHERE p.slug = ?
@@ -118,13 +119,13 @@ router.get("/:slug/meta", auth, (req, res) => {
     LIMIT 1
   `;
 
-  // Notice we removed the third user_id parameter here
+  // Two parameters: slug, user_id
   db.query(sql, [slug, user_id], (err, rows) => {
     if (err || !rows.length) {
-      return res.status(403).json({ msg: "Access denied" });
+      return res.status(403).json({ msg: "Access denied or book not found" });
     }
 
-    res.json(rows[0]);
+    res.json(rows[0]); // ✅ Now includes BOTH main_image and ebook_cover
   });
 });
 
