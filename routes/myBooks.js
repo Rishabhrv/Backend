@@ -98,7 +98,7 @@ router.get("/:slug/meta", auth, (req, res) => {
   const { slug } = req.params;
 
   const sql = `
-    SELECT p.title
+    SELECT p.title, p.main_image
     FROM products p
     INNER JOIN product_categories pc ON pc.product_id = p.id
     INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
