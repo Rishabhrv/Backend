@@ -64,17 +64,19 @@ router.get("/ebooksperview/:slug/meta", adminAuth, (req, res) => {
   const { slug } = req.params; 
 
   const sql = `
-    SELECT p.title, p.main_image
+    SELECT p.title, p.main_image, e.ebook_cover
     FROM products p
+    LEFT JOIN ebooks e ON e.product_id = p.id
     WHERE p.slug = ?
     LIMIT 1
   `; 
+  
   db.query(sql, [slug], (err, rows) => {
-      if (err) return res.status(500).json(err);
-    if (!rows.length)
-      return res.status(404).json({ msg: "Book not found" });
-    res.json(rows[0]); // ✅ Now includes main_image
-});
+    if (err) return res.status(500).json(err);
+    if (!rows.length) return res.status(404).json({ msg: "Book not found" });
+    
+    res.json(rows[0]); // ✅ Now includes BOTH main_image and ebook_cover
+  });
 });
 
 module.exports = router;
