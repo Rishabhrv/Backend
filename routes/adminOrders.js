@@ -518,6 +518,9 @@ router.get("/orders", adminAuth, (req, res) => {
 /* ════════════════════════════════════════
    GET /api/admin/orders/:id
 ════════════════════════════════════════ */
+/* ════════════════════════════════════════
+   GET /api/admin/orders/:id
+════════════════════════════════════════ */
 router.get("/orders/:id", adminAuth, (req, res) => {
   const orderId = req.params.id;
 
@@ -538,6 +541,12 @@ router.get("/orders/:id", adminAuth, (req, res) => {
 
       db.query(`SELECT * FROM order_address WHERE order_id = ? LIMIT 1`, [orderId], (err, addrRows) => {
         if (err) return res.status(500).json({ msg: "DB error" });
+
+        // 1. Get the billing address row
+        const billingAddress = addrRows[0] || {};
+        
+        // 2. Fetch phone from order_address, fallback to user profile phone
+        const orderPhone = billingAddress.phone || order.phone;
 
         db.query(
           `SELECT p.title, p.main_image, oi.quantity, oi.price, oi.format,
@@ -573,8 +582,9 @@ router.get("/orders/:id", adminAuth, (req, res) => {
                   coupon_code: order.coupon_code,
                   coupon_discount: order.coupon_discount,
                 },
-                customer: { name: order.name, email: order.email, phone: order.phone },
-                billing:  addrRows[0] || {},
+                // 3. Pass the resolved orderPhone here
+                customer: { name: order.name, email: order.email, phone: orderPhone }, 
+                billing:  billingAddress,
                 shipping: shipRows[0] || {},
                 items: normItems,
               });
