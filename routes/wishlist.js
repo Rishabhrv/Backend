@@ -50,6 +50,7 @@ router.post("/:productId", auth, (req, res) => {
   );
 });
 
+
 /* ================= GET MY WISHLIST ================= */
 /* GET /api/wishlist/my */
 
@@ -60,14 +61,16 @@ router.get("/my", auth, (req, res) => {
         p.title,
         p.slug,
         p.sell_price,
+        e.sell_price AS ebook_sell_price,
         p.main_image,
         p.product_type,
         p.stock
     FROM wishlist w
     JOIN products p ON p.id = w.product_id
-    INNER JOIN product_categories pc ON pc.product_id = p.id
-    INNER JOIN categories c ON c.id = pc.category_id AND c.imprint = 'agph'
-    WHERE w.user_id = ?
+    LEFT JOIN ebooks e ON e.product_id = p.id
+    JOIN product_categories pc ON pc.product_id = p.id
+    JOIN categories c ON c.id = pc.category_id
+    WHERE w.user_id = ? AND c.imprint = 'agph'
     GROUP BY p.id`,
     [req.user.id],
     (err, rows) => {
@@ -76,7 +79,6 @@ router.get("/my", auth, (req, res) => {
     }
   );
 });
-
 
 /* ================= REMOVE ITEM ================= */
 /* DELETE /api/wishlist/remove/:productId */
