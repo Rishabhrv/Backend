@@ -9,6 +9,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 5000;
 
 /* ROUTES */
+
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/admin", require("./routes/adminAuth"));
 app.use("/api/categories", require("./routes/categories")); 
@@ -41,6 +42,7 @@ app.use("/api/admin", require("./routes/adminCoupons"));
 app.use("/api/admin", require("./routes/adminads"));
 app.use("/api/admin", require("./routes/adminPayments"));
 app.use("/api/admin", require("./routes/adminSettings"));
+app.use("/api/admin", require("./routes/abandoned-carts"));
 app.use("/api/admin/permissions", require("./routes/adminPermissions"));
 app.use("/api/subjects", require("./routes/subjects"));
 app.use("/api/mylibrary", require("./routes/mylibrary"));

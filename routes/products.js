@@ -380,7 +380,7 @@ router.post(
 router.get("/", (req, res) => {
   const sql = `
 SELECT 
-  p.id, p.title AS name, p.main_image AS image, p.sku, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.created_at AS date,
+  p.id, p.title AS name, p.main_image AS image, p.sku, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.created_at AS date, p.updated_at,
   GROUP_CONCAT(DISTINCT c.name) AS categories,
   GROUP_CONCAT(DISTINCT c.imprint) AS imprints,
   MAX(sm.meta_title) AS meta_title,
@@ -391,7 +391,7 @@ LEFT JOIN product_categories pc ON pc.product_id = p.id
 LEFT JOIN categories c ON c.id = pc.category_id
 LEFT JOIN seo_meta sm ON sm.page_type = 'product' AND sm.page_id = p.id
 WHERE p.status = 'published'
-GROUP BY p.id, p.title, p.main_image, p.sku, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.created_at
+GROUP BY p.id, p.title, p.main_image, p.sku, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.created_at, p.updated_at
 ORDER BY p.created_at DESC
   `;
   db.query(sql, (err, results) => {
@@ -410,7 +410,7 @@ ORDER BY p.created_at DESC
 router.get("/table-product", (req, res) => {
   const sql = `
 SELECT 
-  p.id, p.title AS name, p.main_image AS image, p.sku, p.book_id, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.created_at AS date,
+  p.id, p.title AS name, p.main_image AS image, p.sku, p.book_id, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.created_at AS date, p.updated_at,
   GROUP_CONCAT(DISTINCT c.name) AS categories,
   GROUP_CONCAT(DISTINCT c.imprint) AS imprints,
   MAX(sm.meta_title) AS meta_title,
@@ -420,7 +420,7 @@ FROM products p
 LEFT JOIN product_categories pc ON pc.product_id = p.id
 LEFT JOIN categories c ON c.id = pc.category_id
 LEFT JOIN seo_meta sm ON sm.page_type = 'product' AND sm.page_id = p.id
-GROUP BY p.id, p.title, p.main_image, p.sku, p.book_id, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.created_at
+GROUP BY p.id, p.title, p.main_image, p.sku, p.book_id, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.created_at, p.updated_at
 ORDER BY p.created_at DESC
   `;
   db.query(sql, (err, results) => {
@@ -476,7 +476,7 @@ router.get("/slug/:slug", (req, res) => {
   const sql = `
     SELECT 
       p.id, p.title, p.slug, p.description, p.price, p.sell_price, p.stock, 
-      p.product_type, p.main_image,
+      p.product_type, p.main_image, p.updated_at,
       MAX(sd.weight) AS weight, MAX(sd.length) AS length, 
       MAX(sd.width) AS width, MAX(sd.height) AS height,
       MAX(e.file_path) AS ebook_path,
@@ -531,7 +531,7 @@ router.get("/:id", (req, res) => {
   const { id } = req.params;
   const sql = `
     SELECT 
-      p.id, p.book_id, p.title, p.slug, p.description, p.price, p.sell_price, p.stock, p.sku, p.status, p.product_type, p.main_image,
+      p.id, p.book_id, p.title, p.slug, p.description, p.price, p.sell_price, p.stock, p.sku, p.status, p.product_type, p.main_image, p.updated_at,
       MAX(sd.weight) AS weight, MAX(sd.length) AS length, MAX(sd.width) AS width, MAX(sd.height) AS height,
       MAX(sm.meta_title) AS meta_title, MAX(sm.meta_description) AS meta_description, MAX(sm.keywords) AS keywords,
       MAX(e.file_path) AS ebook_path, MAX(e.file_type) AS ebook_type, MAX(e.price) AS ebook_price, MAX(e.sell_price) AS ebook_sell_price,
@@ -585,9 +585,10 @@ router.put(
     const imagePath = req.files?.image ? `/uploads/products/${req.files.image[0].filename}` : null;
     const ebookCoverPath = req.files?.ebook_cover ? `/uploads/products/${req.files.ebook_cover[0].filename}` : null;
 
+    // Explicitly set updated_at = NOW() to ensure timestamp updates even if only relations change
     const updateSql = `
       UPDATE products SET
-        title = ?, slug = ?, description = ?, price = ?, sell_price = ?, stock = ?, sku = ?, product_type = ?, status = ?, book_id = ?
+        title = ?, slug = ?, description = ?, price = ?, sell_price = ?, stock = ?, sku = ?, product_type = ?, status = ?, book_id = ?, updated_at = NOW()
         ${imagePath ? ", main_image = ?" : ""}
       WHERE id = ?
     `;
@@ -758,7 +759,7 @@ router.put(
 /* ================= TRASH / DELETE ================= */
 router.put("/:id/trash", (req, res) => {
   const { id } = req.params;
-  db.query("UPDATE products SET status = 'trash' WHERE id = ?", [id], (err) => {
+  db.query("UPDATE products SET status = 'trash', updated_at = NOW() WHERE id = ?", [id], (err) => {
     if (err) return res.status(500).json({ message: "Failed to move to trash" });
     res.json({ message: "Product moved to trash" });
   });
@@ -788,7 +789,7 @@ router.delete("/:id", (req, res) => {
 router.post("/bulk-status", (req, res) => {
   const { ids, status } = req.body;
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ message: "No product IDs provided" });
-  db.query(`UPDATE products SET status = ? WHERE id IN (?)`, [status, ids], (err) => {
+  db.query(`UPDATE products SET status = ?, updated_at = NOW() WHERE id IN (?)`, [status, ids], (err) => {
     if (err) return res.status(500).json({ message: "Bulk status update failed" });
     res.json({ success: true });
   });
@@ -804,6 +805,9 @@ router.post("/bulk-category", (req, res) => {
     const values = ids.map((id) => [id, categoryId]);
     db.query(`INSERT INTO product_categories (product_id, category_id) VALUES ?`, [values], (err) => {
       if (err) return res.status(500).json({ message: "Failed to assign category" });
+      
+      // Force the updated_at timestamp to refresh
+      db.query(`UPDATE products SET updated_at = NOW() WHERE id IN (?)`, [ids]);
       res.json({ success: true, message: "Categories updated" });
     });
   });
@@ -841,7 +845,7 @@ router.post("/convert-doc", upload.fields([{ name: "file", maxCount: 1 }, { name
       if (error) return res.status(500).json({ message: "Conversion failed", error: error.message });
       const epubPath = `/uploads/ebooks/${result.epubFilename}`;
 
-      db.query(`UPDATE products SET product_type = ? WHERE id = ?`, [product_type, productId], function (err) {
+      db.query(`UPDATE products SET product_type = ?, updated_at = NOW() WHERE id = ?`, [product_type, productId], function (err) {
         if (err) return res.status(500).json({ message: err.message });
         
         db.query(`SELECT id, ebook_cover FROM ebooks WHERE product_id = ?`, [productId], function (err, rows) {
