@@ -5,25 +5,41 @@ const db = require("../db");
 
 router.post("/track", async (req, res) => {
   try {
-    // 1. Extract 'source' from req.body
     const { sessionId, userId, source } = req.body;
     
     if (!sessionId) return res.status(400).json({ success: false });
 
-    // Grab IP address
-    let ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
-    if (ip && ip.includes(",")) ip = ip.split(",")[0].trim();
+    // 1. Check a wider variety of headers used by live servers/CDNs
+   let rawIp = 
+      req.headers["cf-connecting-ip"] || 
+      req.headers["x-real-ip"] ||        
+      req.headers["x-forwarded-for"] ||  
+      req.socket.remoteAddress || 
+      "";
+
+    let ip = rawIp.split(",")[0].trim();
+    if (ip.startsWith("::ffff:")) {
+      ip = ip.replace("::ffff:", "");
+    }
+
+    // 👇 ADD THIS BLOCK FOR LOCAL TESTING 👇
+    // If the IP is localhost, fake it with a public IP (e.g., Google's 8.8.8.8)
+    if (ip === "::1" || ip === "127.0.0.1") {
+        console.log("Localhost detected! Overriding with a dummy public IP for testing.");
+        ip = "8.8.8.8"; 
+    }
+    // 👆 REMOVE THIS BEFORE GOING TO PRODUCTION 👆
 
     // Convert IP to Location
     const geo = geoip.lookup(ip);
-    
+    console.log("GeoIP Lookup Result:", geo);
+    // --------------------------------
+
     const country = geo?.country || "Unknown";
     const state = geo?.region || "Unknown";
     
-    // 2. Default to 'Unknown' if source wasn't provided by an older client
     const appSource = source || "agph";
 
-    // 3. Update the query to include the new 'source' column
     const query = `
       INSERT INTO visitor_logs (session_id, user_id, ip_address, country, state, source)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -35,7 +51,6 @@ router.post("/track", async (req, res) => {
         last_visited_at = CURRENT_TIMESTAMP
     `;
     
-    // 4. Pass appSource into the query parameters
     await db.promise().query(query, [sessionId, userId || null, ip, country, state, appSource]);
 
     res.json({ success: true });

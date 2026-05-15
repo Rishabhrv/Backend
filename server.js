@@ -4,7 +4,9 @@ const cors = require("cors");
 const app = express();
 
 app.use(cors());
+app.set('trust proxy', true);
 app.use(express.json()); 
+
 
 const PORT = process.env.PORT || 5000;
 
