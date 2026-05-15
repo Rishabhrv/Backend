@@ -357,4 +357,40 @@ router.delete("/:slug/favorite", auth, (req, res) => {
 });
 
 
+
+/* ===============================================
+   1️⃣4️⃣  TRACK READING TIME
+=============================================== */
+router.post("/:slug/track-time", auth, (req, res) => {
+  const { duration } = req.body;
+  const user_id = req.user.id;
+  const { slug } = req.params;
+
+  // Reject invalid or empty durations
+  if (!duration || duration <= 0) {
+    return res.json({ success: true, ignored: true });
+  }
+
+  // Find the exact ebook_id using the slug, scoped to agph
+  const sql = `
+    INSERT INTO ebook_reading_sessions (user_id, ebook_id, duration_seconds)
+    SELECT ?, e.id, ?
+    FROM ebooks e
+    JOIN products p ON p.id = e.product_id
+    JOIN product_categories pc ON pc.product_id = p.id
+    JOIN categories cat ON cat.id = pc.category_id
+    WHERE p.slug = ?
+      AND cat.imprint = 'agph'
+    LIMIT 1
+  `;
+
+  db.query(sql, [user_id, duration, slug], (err, result) => {
+    if (err) {
+      console.error("Error tracking time:", err);
+      return res.status(500).json({ msg: "Failed to track time" });
+    }
+    res.json({ success: true });
+  });
+});
+
 module.exports = router;

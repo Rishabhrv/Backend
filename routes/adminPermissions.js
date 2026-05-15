@@ -9,7 +9,7 @@ const SECRET = "MY_SECRET_KEY";
 const ALL_PAGES = [
   "products", "orders", "category", "subject",
   "author", "users", "reviews", "shipping",
-  "subscriptions", "payment", "coupons", "ads",
+  "subscriptions", "payment", "coupons", "ads", "analytics", "ebook-analytics",
 ];
 
 function adminAuth(req, res, next) {

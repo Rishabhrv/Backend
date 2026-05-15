@@ -43,6 +43,8 @@ app.use("/api/admin", require("./routes/adminads"));
 app.use("/api/admin", require("./routes/adminPayments"));
 app.use("/api/admin", require("./routes/adminSettings"));
 app.use("/api/admin", require("./routes/abandoned-carts"));
+app.use("/api/admin", require("./routes/adminAnalytics"));
+app.use("/api/admin", require("./routes/adminebookAnalytics"));
 app.use("/api/admin/permissions", require("./routes/adminPermissions"));
 app.use("/api/subjects", require("./routes/subjects"));
 app.use("/api/mylibrary", require("./routes/mylibrary"));
@@ -53,6 +55,7 @@ app.use('/api/invoice', require('./routes/invoice'));
 app.use("/api/shipping", require("./routes/shipping"));
 app.use("/api/stock-notifications", require("./routes/stockNotifications"));
 app.use("/api/public-ads", require("./routes/publicAds"));
+app.use("/api/analytics", require("./routes/analytics"));
 
 // AG Classics
 app.use("/api/ag-classics/payment-history", require("./ag-classics/payment-history"));
