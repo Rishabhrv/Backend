@@ -224,6 +224,22 @@ const generateUniqueSlug = (baseSlug, callback) => {
   checkSlug();
 };
 
+// HELPER: Convert JS dates like 14/01/2026 or 14-01-2026 to MySQL YYYY-MM-DD safely
+function parseDate(d) {
+  if (!d) return null;
+  d = d.trim();
+  if (d.includes('/')) {
+      const p = d.split('/');
+      if (p.length === 3) return `${p[2]}-${p[1]}-${p[0]}`;
+  } else if (d.includes('-')) {
+      const p = d.split('-');
+      if (p.length === 3) {
+          return p[0].length === 4 ? d : `${p[2]}-${p[1]}-${p[0]}`;
+      }
+  }
+  return null;
+}
+
 /* ================= ADD PRODUCT ================= */
 router.post(
   "/",
@@ -234,25 +250,57 @@ router.post(
     { name: "gallery", maxCount: 9 },
   ]),
   (req, res) => {
-    const {
+    let {
       title, description, price, sell_price, stock, sku, product_type,
       status, weight, length, width, height, ebook_price, ebook_sell_price, book_id
     } = req.body;
+
+    price = price || null;
+    sell_price = sell_price || null;
+    stock = stock || null;
+    weight = weight || null;
+    length = length || null;
+    width = width || null;
+    height = height || null;
+    ebook_price = ebook_price || null;
+    ebook_sell_price = ebook_sell_price || null;
+    description = description || null;
+    sku = sku || null;
+    book_id = book_id || null;
 
     const imagePath = req.files.image ? `/uploads/products/${req.files.image[0].filename}` : (req.body.image_url || null);
     const ebookCoverPath = req.files?.ebook_cover ? `/uploads/products/${req.files.ebook_cover[0].filename}` : null;
 
     const slug = generateSlug(title);
 
+    // ── NEW: Extract Fixed Attributes Before Insert ──
+    let isbn = null;
+    let no_of_pages = null;
+    let publication_date = null;
+
+    if (req.body.attributes) {
+      const parsedAttrs = JSON.parse(req.body.attributes);
+      
+      const isbnAttr = parsedAttrs.find(a => a.name?.toLowerCase() === "isbn");
+      if (isbnAttr?.values?.trim()) isbn = isbnAttr.values.trim();
+
+      const pagesAttr = parsedAttrs.find(a => a.name?.toLowerCase() === "no. of pages");
+      if (pagesAttr?.values?.trim()) no_of_pages = parseInt(pagesAttr.values.trim(), 10) || null;
+
+      const dateAttr = parsedAttrs.find(a => a.name?.toLowerCase() === "publication date");
+      if (dateAttr?.values?.trim()) publication_date = parseDate(dateAttr.values);
+    }
+
+    // Include the 3 new fields in the insert query
     const productSql = `
       INSERT INTO products
-      (title, slug, description, price, sell_price, stock, sku, product_type, status, main_image, book_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (title, slug, description, price, sell_price, stock, sku, product_type, status, main_image, book_id, isbn, no_of_pages, publication_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     db.query(
       productSql,
-      [title, slug, description, price, sell_price, stock, sku, product_type, status, imagePath, book_id || null],
+      [title, slug, description, price, sell_price, stock, sku, product_type, status, imagePath, book_id || null, isbn, no_of_pages, publication_date],
       (err, result) => {
         if (err) return res.status(500).json({ message: err.message });
 
@@ -275,10 +323,7 @@ router.post(
                 });
               });
             });
-            const isbnAttr = attributes.find((a) => a.name?.toLowerCase() === "isbn");
-            if (isbnAttr?.values?.trim()) {
-              db.query(`UPDATE products SET isbn = ? WHERE id = ?`, [isbnAttr.values.trim(), productId]);
-            }
+            // REMOVED old ISBN UPDATE QUERY here since it's now handled in the main INSERT above
           }
           if (req.body.categories) {
             const categories = JSON.parse(req.body.categories);
@@ -565,6 +610,8 @@ router.get("/:id/gallery", (req, res) => {
   });
 });
 
+
+
 /* ================= UPDATE PRODUCT ================= */
 router.put(
   "/:id",
@@ -576,26 +623,58 @@ router.put(
   ]),
   (req, res) => {
     const { id } = req.params;
-    const {
+    
+    let {
       title, slug, description, price, sell_price, stock, sku, product_type, status,
       weight, length, width, height, meta_title, meta_description, keywords,
       categories, attributes, authors, ebook_price, ebook_sell_price, book_id,
     } = req.body;
 
+    price = price || null;
+    sell_price = sell_price || null;
+    stock = stock || null;
+    weight = weight || null;
+    length = length || null;
+    width = width || null;
+    height = height || null;
+    ebook_price = ebook_price || null;
+    ebook_sell_price = ebook_sell_price || null;
+    description = description || null;
+    sku = sku || null;
+    book_id = book_id || null;
+
     const imagePath = req.files?.image ? `/uploads/products/${req.files.image[0].filename}` : null;
     const ebookCoverPath = req.files?.ebook_cover ? `/uploads/products/${req.files.ebook_cover[0].filename}` : null;
 
-    // Explicitly set updated_at = NOW() to ensure timestamp updates even if only relations change
+    // ── NEW: Extract Fixed Attributes Before Update ──
+    let isbn = null;
+    let no_of_pages = null;
+    let publication_date = null;
+
+    if (attributes) {
+      const parsedAttrs = JSON.parse(attributes);
+      
+      const isbnAttr = parsedAttrs.find(a => a.name?.toLowerCase() === "isbn");
+      if (isbnAttr?.values?.trim()) isbn = isbnAttr.values.trim();
+
+      const pagesAttr = parsedAttrs.find(a => a.name?.toLowerCase() === "no. of pages");
+      if (pagesAttr?.values?.trim()) no_of_pages = parseInt(pagesAttr.values.trim(), 10) || null;
+
+      const dateAttr = parsedAttrs.find(a => a.name?.toLowerCase() === "publication date");
+      if (dateAttr?.values?.trim()) publication_date = parseDate(dateAttr.values);
+    }
+
     const updateSql = `
       UPDATE products SET
-        title = ?, slug = ?, description = ?, price = ?, sell_price = ?, stock = ?, sku = ?, product_type = ?, status = ?, book_id = ?, updated_at = NOW()
+        title = ?, slug = ?, description = ?, price = ?, sell_price = ?, stock = ?, sku = ?, product_type = ?, status = ?, book_id = ?, updated_at = NOW(),
+        isbn = ?, no_of_pages = ?, publication_date = ?
         ${imagePath ? ", main_image = ?" : ""}
       WHERE id = ?
     `;
 
     const params = imagePath
-      ? [title, slug, description, price, sell_price, stock, sku, product_type, status, book_id || null, imagePath, id]
-      : [title, slug, description, price, sell_price, stock, sku, product_type, status, book_id || null, id];
+      ? [title, slug, description, price, sell_price, stock, sku, product_type, status, book_id || null, isbn, no_of_pages, publication_date, imagePath, id]
+      : [title, slug, description, price, sell_price, stock, sku, product_type, status, book_id || null, isbn, no_of_pages, publication_date, id];
 
     db.query(`SELECT stock FROM products WHERE id = ?`, [id], (err, stockRows) => {
       const wasOutOfStock = !err && stockRows.length && Number(stockRows[0].stock) === 0;
@@ -643,13 +722,7 @@ router.put(
                 });
               });
             });
-            const parsedAttrs = JSON.parse(attributes);
-            const isbnAttr = parsedAttrs.find((a) => a.name?.toLowerCase() === "isbn");
-            if (isbnAttr?.values?.trim()) {
-              db.query(`UPDATE products SET isbn = ? WHERE id = ?`, [isbnAttr.values.trim(), id]);
-            } else {
-              db.query(`UPDATE products SET isbn = NULL WHERE id = ?`, [id]);
-            }
+            // REMOVED old ISBN UPDATE QUERY here since it's now handled in the main UPDATE above
           }
         });
 
@@ -903,10 +976,26 @@ router.post("/convert-doc", upload.fields([{ name: "file", maxCount: 1 }, { name
 
   function createProductIfNeeded(callback) {
     if (productId) return callback(productId);
+    
+    let isbn = null;
+    let no_of_pages = null;
+    let publication_date = null;
+
+    if (attributes) {
+      const isbnAttr = attributes.find(a => a.name?.toLowerCase() === "isbn");
+      if (isbnAttr?.value?.trim()) isbn = isbnAttr.value.trim();
+
+      const pagesAttr = attributes.find(a => a.name?.toLowerCase() === "no. of pages");
+      if (pagesAttr?.value?.trim()) no_of_pages = parseInt(pagesAttr.value.trim(), 10) || null;
+
+      const dateAttr = attributes.find(a => a.name?.toLowerCase() === "publication date");
+      if (dateAttr?.value?.trim()) publication_date = parseDate(dateAttr.value);
+    }
+
     generateDraftSlugIfNeeded((finalSlug) => {
       db.query(
-        `INSERT INTO products (title, slug, description, price, sell_price, stock, sku, product_type, status, book_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [title, finalSlug, description, price || null, sell_price || null, stock || null, sku || null, product_type, "draft", book_id || null],
+        `INSERT INTO products (title, slug, description, price, sell_price, stock, sku, product_type, status, book_id, isbn, no_of_pages, publication_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [title, finalSlug, description, price || null, sell_price || null, stock || null, sku || null, product_type, "draft", book_id || null, isbn, no_of_pages, publication_date],
         (err, result) => {
           if (err) return res.status(500).json({ message: err.message });
           callback(result.insertId);

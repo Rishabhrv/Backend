@@ -32,7 +32,6 @@ router.post("/track", async (req, res) => {
 
     // Convert IP to Location
     const geo = geoip.lookup(ip);
-    console.log("GeoIP Lookup Result:", geo);
     // --------------------------------
 
     const country = geo?.country || "Unknown";
