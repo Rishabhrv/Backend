@@ -25,7 +25,6 @@ router.post("/track", async (req, res) => {
     // 👇 ADD THIS BLOCK FOR LOCAL TESTING 👇
     // If the IP is localhost, fake it with a public IP (e.g., Google's 8.8.8.8)
     if (ip === "::1" || ip === "127.0.0.1") {
-        console.log("Localhost detected! Overriding with a dummy public IP for testing.");
         ip = "8.8.8.8"; 
     }
     // 👆 REMOVE THIS BEFORE GOING TO PRODUCTION 👆

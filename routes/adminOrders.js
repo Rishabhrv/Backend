@@ -33,9 +33,7 @@ const UNIFIED_MAP = {
   cancelled:        { orderStatus: "cancelled", shippingStatus: null },
 };
 
-/* ════════════════════════════════════════════════════════
-   AGPH EMAIL TEMPLATE  (light theme — existing)
-════════════════════════════════════════════════════════ */
+
 /* ════════════════════════════════════════════════════════
    NEW AGPH EMAIL TEMPLATE (Refined Light Theme)
 ════════════════════════════════════════════════════════ */
@@ -515,9 +513,7 @@ router.get("/orders", adminAuth, (req, res) => {
   );
 });
 
-/* ════════════════════════════════════════
-   GET /api/admin/orders/:id
-════════════════════════════════════════ */
+
 /* ════════════════════════════════════════
    GET /api/admin/orders/:id
 ════════════════════════════════════════ */
@@ -567,26 +563,35 @@ router.get("/orders/:id", adminAuth, (req, res) => {
               imprint: (i.imprint || "").includes("agclassics") ? "agclassics" : "agph",
             }));
 
+           // FETCH SHIPPING
             db.query(`SELECT * FROM shipping WHERE order_id = ? LIMIT 1`, [orderId], (err, shipRows) => {
               if (err) return res.status(500).json({ msg: "DB error" });
 
-              res.json({
-                order: {
-                  id: order.id,
-                  status: order.status,
-                  payment_status: order.payment_status,
-                  total_amount: order.total_amount,
-                  created_at: order.created_at,
-                  razorpay_order_id: order.razorpay_order_id,
-                  razorpay_payment_id: order.razorpay_payment_id,
-                  coupon_code: order.coupon_code,
-                  coupon_discount: order.coupon_discount,
-                },
-                // 3. Pass the resolved orderPhone here
-                customer: { name: order.name, email: order.email, phone: orderPhone }, 
-                billing:  billingAddress,
-                shipping: shipRows[0] || {},
-                items: normItems,
+              // FETCH SYSTEM LOGS FOR TIMELINE
+              db.query(
+                `SELECT * FROM system_logs WHERE entity_type = 'order' AND entity_id = ? ORDER BY created_at DESC`,
+                [orderId],
+                (err, logs) => {
+                  if (err) return res.status(500).json({ msg: "DB error" });
+
+                  res.json({
+                    order: {
+                      id: order.id,
+                      status: order.status,
+                      payment_status: order.payment_status,
+                      total_amount: order.total_amount,
+                      created_at: order.created_at,
+                      razorpay_order_id: order.razorpay_order_id,
+                      razorpay_payment_id: order.razorpay_payment_id,
+                      coupon_code: order.coupon_code,
+                      coupon_discount: order.coupon_discount,
+                    },
+                    customer: { name: order.name, email: order.email, phone: orderPhone }, 
+                    billing:  billingAddress,
+                    shipping: shipRows[0] || {},
+                    items: normItems,
+                    logs: logs || [] // 🌟 Pass logs back to frontend
+                  });
               });
             });
           }
@@ -697,16 +702,56 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
                 tracking_number, courier, normItems
               );
 
-              // 7. Send customer emails
+// 7. Send customer emails
               for (const email of emails) {
                 try {
-                  await transporter.sendMail({
-                    from:    `"${email.brand === "agclassics" ? "AG Classics" : "AGPH Books Store"}" <${process.env.MAIL_USER}>`,
-                    to:      customer.email,
+                  const info = await transporter.sendMail({
+                    from: `"${email.brand === "agclassics" ? "AG Classics" : "AGPH Books Store"}" <${process.env.MAIL_USER}>`,
+                    to: customer.email,
                     subject: email.subject,
-                    html:    email.html,
+                    html: email.html,
                   });
+
+                  if (info.rejected && info.rejected.length > 0) {
+                    // LOG: Failed (Rejected by server)
+                    const details = JSON.stringify({
+                      brand: email.brand,
+                      recipient_email: customer.email,
+                      recipient_type: "customer",
+                      subject: email.subject
+                    });
+                    db.query(
+                      `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, error_message, details) VALUES ('email_sent', 'order', ?, ?, 'failed', ?, ?)`,
+                      [orderId, req.admin.id, `Rejected by SMTP: ${info.rejected.join(", ")}`, details]
+                    );
+                    console.error(`⚠️ Email rejected for: ${info.rejected.join(", ")}`);
+                  } else {
+                    // LOG: Success
+                    const details = JSON.stringify({
+                      brand: email.brand,
+                      recipient_email: customer.email,
+                      recipient_type: "customer",
+                      subject: email.subject,
+                      message_id: info.messageId
+                    });
+                    db.query(
+                      `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, details) VALUES ('email_sent', 'order', ?, ?, 'success', ?)`,
+                      [orderId, req.admin.id, details]
+                    );
+                  }
+
                 } catch (mailErr) {
+                  // LOG: Failed (Exception/Timeout)
+                  const details = JSON.stringify({
+                    brand: email.brand,
+                    recipient_email: customer.email,
+                    recipient_type: "customer",
+                    subject: email.subject
+                  });
+                  db.query(
+                    `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, error_message, details) VALUES ('email_sent', 'order', ?, ?, 'failed', ?, ?)`,
+                    [orderId, req.admin.id, mailErr.message, details]
+                  );
                   console.error(`Mail send error (${email.brand}):`, mailErr.message);
                 }
               }
@@ -722,11 +767,13 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
                     <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:11px;font-weight:700;text-align:right;">₹${(Number(item.price) * Number(item.quantity)).toFixed(2)}</td>
                   </tr>`).join("");
 
+                const adminSubject = `[New Order] #${order.id} — ₹${order.total_amount} — ${customer.name}`;
+
                 try {
-                  await transporter.sendMail({
-                    from:    `"AGPH Books Store" <${process.env.MAIL_USER}>`,
-                    to:      process.env.ADMIN_MAIL,
-                    subject: `[New Order] #${order.id} — ₹${order.total_amount} — ${customer.name}`,
+                  const adminInfo = await transporter.sendMail({
+                    from: `"AGPH Books Store" <${process.env.MAIL_USER}>`,
+                    to: process.env.ADMIN_MAIL,
+                    subject: adminSubject,
                     html: `
                       <div style="font-family:sans-serif;max-width:640px;margin:auto;background:#f8fafc;">
                         <div style="background:#0f172a;padding:20px 28px;border-radius:10px 10px 0 0;">
@@ -758,7 +805,46 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
                         </div>
                       </div>`,
                   });
+
+                  if (adminInfo.rejected && adminInfo.rejected.length > 0) {
+                    // LOG: Admin Failed (Rejected by server)
+                    const details = JSON.stringify({
+                      brand: "agph",
+                      recipient_email: process.env.ADMIN_MAIL,
+                      recipient_type: "admin",
+                      subject: adminSubject
+                    });
+                    db.query(
+                      `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, error_message, details) VALUES ('email_sent', 'order', ?, ?, 'failed', ?, ?)`,
+                      [orderId, req.admin.id, `Rejected by SMTP: ${adminInfo.rejected.join(", ")}`, details]
+                    );
+                  } else {
+                    // LOG: Admin Success
+                    const details = JSON.stringify({
+                      brand: "agph",
+                      recipient_email: process.env.ADMIN_MAIL,
+                      recipient_type: "admin",
+                      subject: adminSubject,
+                      message_id: adminInfo.messageId
+                    });
+                    db.query(
+                      `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, details) VALUES ('email_sent', 'order', ?, ?, 'success', ?)`,
+                      [orderId, req.admin.id, details]
+                    );
+                  }
+
                 } catch (mailErr) {
+                  // LOG: Admin Failed (Exception/Timeout)
+                  const details = JSON.stringify({
+                    brand: "agph",
+                    recipient_email: process.env.ADMIN_MAIL,
+                    recipient_type: "admin",
+                    subject: adminSubject
+                  });
+                  db.query(
+                    `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, error_message, details) VALUES ('email_sent', 'order', ?, ?, 'failed', ?, ?)`,
+                    [orderId, req.admin.id, mailErr.message, details]
+                  );
                   console.error("Admin mail error:", mailErr.message);
                 }
               }
@@ -769,6 +855,49 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
         }
       );
     });
+  });
+});
+
+/* ════════════════════════════════════════
+   PUT /api/admin/orders/:id/address
+════════════════════════════════════════ */
+router.put("/orders/:id/address", adminAuth, (req, res) => {
+  const orderId = req.params.id;
+  const { address, city, state, pincode, phone } = req.body;
+
+  db.query(`SELECT id FROM order_address WHERE order_id = ?`, [orderId], (err, rows) => {
+    if (err) return res.status(500).json({ msg: "Database error checking address" });
+
+    if (rows.length > 0) {
+      // Update ONLY the requested text, city, state, pincode, and phone columns
+      const updateSql = `
+        UPDATE order_address 
+        SET address = ?, city = ?, state = ?, pincode = ?, phone = ?
+        WHERE order_id = ?
+      `;
+      db.query(
+        updateSql,
+        [address, city, state, pincode, phone, orderId],
+        (err) => {
+          if (err) return res.status(500).json({ msg: "Failed to update address details" });
+          return res.json({ msg: "Shipping address updated successfully" });
+        }
+      );
+    } else {
+      // Fallback insert if no address record exists yet
+      const insertSql = `
+        INSERT INTO order_address (order_id, address, city, state, pincode, phone)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `;
+      db.query(
+        insertSql,
+        [orderId, address, city, state, pincode, phone],
+        (err) => {
+          if (err) return res.status(500).json({ msg: "Failed to save address" });
+          return res.json({ msg: "Shipping address created and saved" });
+        }
+      );
+    }
   });
 });
 

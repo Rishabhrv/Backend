@@ -189,31 +189,14 @@ router.post("/create", auth, (req, res) => {
                   }
                 );
               }
-
-              // get user email for the notification message
-              db.query(
-                `SELECT email FROM users WHERE id = ?`,
-                [user_id],
-                (err, userRows) => {
-                  const userEmail = (!err && userRows.length) ? userRows[0].email : "a customer";
-              
-                  createAdminNotification(
-                    "order",
-                    "New Order Received",
-                    `Order #${order_id} placed by ${userEmail} — ₹${total}`,
-                    order_id
-                  );
-              
-                  res.json({
-                    msg: "Order created",
-                    order_id,
-                    subtotal,
-                    shipping,
-                    discount,
-                    total,
-                  });
-                }
-              );
+              res.json({
+                msg: "Order created",
+                order_id,
+                subtotal,
+                shipping,
+                discount,
+                total,
+              });
             }
           );
         }

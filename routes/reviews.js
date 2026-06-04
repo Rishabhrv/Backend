@@ -84,6 +84,18 @@ router.get("/product/:productId", (req, res) => {
 });
 
 
+router.get("/count/pending", (req, res) => {
+  const sql = `SELECT COUNT(id) AS pendingCount FROM reviews WHERE status = 'pending'`;
+
+  db.query(sql, (err, rows) => {
+    if (err) {
+      console.error("Error fetching pending reviews count:", err);
+      return res.status(500).json({ msg: "Database error" });
+    }
+    res.json({ count: rows[0].pendingCount || 0 });
+  });
+});
+
 /* ================= ADD / UPDATE REVIEW ================= */
 router.post("/", auth, upload.array("images", 5), (req, res) => {
   const { product_id, rating, comment } = req.body;

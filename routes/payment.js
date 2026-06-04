@@ -8,6 +8,7 @@ const nodemailer = require("nodemailer");
 
 // ✅ Reuse the exact same template function from adminorder.js — no duplication
 const { shippingEmailTemplate } = require("./adminOrders");
+const { createAdminNotification } = require("./adminnotifications");
 
 const SECRET = "MY_SECRET_KEY";
 
@@ -165,6 +166,27 @@ router.post("/verify", auth, (req, res) => {
      WHERE id = ?`,
     [razorpay_payment_id, order_id],
     () => {
+
+      // ─────────────────────────────────────────────────────────────────
+      // NEW: Trigger Notification ONLY on successful payment verification
+      // ─────────────────────────────────────────────────────────────────
+      db.query(
+        `SELECT o.total_amount, u.email 
+         FROM orders o 
+         JOIN users u ON u.id = o.user_id 
+         WHERE o.id = ?`,
+        [order_id],
+        (err, rows) => {
+          if (!err && rows.length > 0) {
+            createAdminNotification(
+              "order",
+              "New Order Received",
+              `Order #${order_id} placed by ${rows[0].email} — ₹${rows[0].total_amount}`,
+              order_id
+            );
+          }
+        }
+      );
 
       // 3. Deduct stock for paperback items
       db.query(

@@ -33,6 +33,35 @@ router.get("/", auth, (req, res) => {
 });
 
 
+/* ==========================================================
+   GET UNPROCESS-SHIPPED CONFIRMED & PAID ORDERS COUNT (ADMIN ONLY)
+========================================================== */
+router.get("/count/new-confirmed", (req, res) => {
+  const sql = `
+    SELECT COUNT(DISTINCT s.order_id) AS newConfirmedCount 
+    FROM shipping s
+    INNER JOIN orders o ON s.order_id = o.id
+    WHERE s.status = 'confirmed'
+      AND o.status = 'paid'
+      AND o.payment_status = 'success'
+      AND EXISTS (
+        SELECT 1 
+        FROM order_items oi 
+        WHERE oi.order_id = o.id 
+          AND oi.format = 'paperback'
+      )
+  `;
+
+  db.query(sql, (err, rows) => {
+    if (err) {
+      console.error("Error fetching admin confirmed order count:", err);
+      return res.status(500).json({ msg: "Database error" });
+    }
+    res.json({ count: rows[0].newConfirmedCount || 0 });
+  });
+});
+
+
 /* ================= PAID ORDERS GROUPED BY DATE ================= */
 router.get("/by-date", auth, (req, res) => {
   const sql = `

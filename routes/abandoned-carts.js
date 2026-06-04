@@ -71,7 +71,14 @@ router.get("/abandoned-carts/all", adminAuth, (req, res) => {
       cartsMap[row.user_id].items.push({ title: row.title, format: row.format, quantity: row.quantity });
     });
 
-    res.json(Object.values(cartsMap));
+    // ─────────────────────────────────────────────────────────────────
+    // FIX: Re-sort the grouped items by `lastActive` descending
+    // ─────────────────────────────────────────────────────────────────
+    const sortedCarts = Object.values(cartsMap).sort((a, b) => {
+      return new Date(b.lastActive) - new Date(a.lastActive);
+    });
+
+    res.json(sortedCarts);
   });
 });
 
