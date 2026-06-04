@@ -608,6 +608,9 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
   const orderId = req.params.id;
   const { unifiedStatus, courier = "", tracking_number = "" } = req.body;
 
+  // Safe fallback identification for the acting administrator profile
+  const adminActorId = req.admin?.id || req.admin?.user_id || null;
+
   // 1. Validate
   const mapping = UNIFIED_MAP[unifiedStatus];
   if (!mapping) return res.status(400).json({ msg: "Invalid status" });
@@ -702,7 +705,7 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
                 tracking_number, courier, normItems
               );
 
-// 7. Send customer emails
+              // 7. Send customer emails
               for (const email of emails) {
                 try {
                   const info = await transporter.sendMail({
@@ -713,44 +716,41 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
                   });
 
                   if (info.rejected && info.rejected.length > 0) {
-                    // LOG: Failed (Rejected by server)
-                    const details = JSON.stringify({
+                    const detailsObj = {
                       brand: email.brand,
                       recipient_email: customer.email,
                       recipient_type: "customer",
                       subject: email.subject
-                    });
+                    };
                     db.query(
-                      `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, error_message, details) VALUES ('email_sent', 'order', ?, ?, 'failed', ?, ?)`,
-                      [orderId, req.admin.id, `Rejected by SMTP: ${info.rejected.join(", ")}`, details]
+                      `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, error_message, details) VALUES ('email_sent', 'order', ?, ?, 'failed', ?, CAST(? AS JSON))`,
+                      [orderId, adminActorId, `Rejected by SMTP: ${info.rejected.join(", ")}`, JSON.stringify(detailsObj)]
                     );
                     console.error(`⚠️ Email rejected for: ${info.rejected.join(", ")}`);
                   } else {
-                    // LOG: Success
-                    const details = JSON.stringify({
+                    const detailsObj = {
                       brand: email.brand,
                       recipient_email: customer.email,
                       recipient_type: "customer",
                       subject: email.subject,
                       message_id: info.messageId
-                    });
+                    };
                     db.query(
-                      `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, details) VALUES ('email_sent', 'order', ?, ?, 'success', ?)`,
-                      [orderId, req.admin.id, details]
+                      `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, details) VALUES ('email_sent', 'order', ?, ?, 'success', CAST(? AS JSON))`,
+                      [orderId, adminActorId, JSON.stringify(detailsObj)]
                     );
                   }
 
                 } catch (mailErr) {
-                  // LOG: Failed (Exception/Timeout)
-                  const details = JSON.stringify({
+                  const detailsObj = {
                     brand: email.brand,
                     recipient_email: customer.email,
                     recipient_type: "customer",
                     subject: email.subject
-                  });
+                  };
                   db.query(
-                    `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, error_message, details) VALUES ('email_sent', 'order', ?, ?, 'failed', ?, ?)`,
-                    [orderId, req.admin.id, mailErr.message, details]
+                    `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, error_message, details) VALUES ('email_sent', 'order', ?, ?, 'failed', ?, CAST(? AS JSON))`,
+                    [orderId, adminActorId, mailErr.message, JSON.stringify(detailsObj)]
                   );
                   console.error(`Mail send error (${email.brand}):`, mailErr.message);
                 }
@@ -807,48 +807,46 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
                   });
 
                   if (adminInfo.rejected && adminInfo.rejected.length > 0) {
-                    // LOG: Admin Failed (Rejected by server)
-                    const details = JSON.stringify({
+                    const detailsObj = {
                       brand: "agph",
                       recipient_email: process.env.ADMIN_MAIL,
                       recipient_type: "admin",
                       subject: adminSubject
-                    });
+                    };
                     db.query(
-                      `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, error_message, details) VALUES ('email_sent', 'order', ?, ?, 'failed', ?, ?)`,
-                      [orderId, req.admin.id, `Rejected by SMTP: ${adminInfo.rejected.join(", ")}`, details]
+                      `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, error_message, details) VALUES ('email_sent', 'order', ?, ?, 'failed', ?, CAST(? AS JSON))`,
+                      [orderId, adminActorId, `Rejected by SMTP: ${adminInfo.rejected.join(", ")}`, JSON.stringify(detailsObj)]
                     );
                   } else {
-                    // LOG: Admin Success
-                    const details = JSON.stringify({
+                    const detailsObj = {
                       brand: "agph",
                       recipient_email: process.env.ADMIN_MAIL,
                       recipient_type: "admin",
                       subject: adminSubject,
                       message_id: adminInfo.messageId
-                    });
+                    };
                     db.query(
-                      `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, details) VALUES ('email_sent', 'order', ?, ?, 'success', ?)`,
-                      [orderId, req.admin.id, details]
+                      `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, details) VALUES ('email_sent', 'order', ?, ?, 'success', CAST(? AS JSON))`,
+                      [orderId, adminActorId, JSON.stringify(detailsObj)]
                     );
                   }
 
                 } catch (mailErr) {
-                  // LOG: Admin Failed (Exception/Timeout)
-                  const details = JSON.stringify({
+                  const detailsObj = {
                     brand: "agph",
                     recipient_email: process.env.ADMIN_MAIL,
                     recipient_type: "admin",
                     subject: adminSubject
-                  });
+                  };
                   db.query(
-                    `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, error_message, details) VALUES ('email_sent', 'order', ?, ?, 'failed', ?, ?)`,
-                    [orderId, req.admin.id, mailErr.message, details]
+                    `INSERT INTO system_logs (event_type, entity_type, entity_id, actor_id, status, error_message, details) VALUES ('email_sent', 'order', ?, ?, 'failed', ?, CAST(? AS JSON))`,
+                    [orderId, adminActorId, mailErr.message, JSON.stringify(detailsObj)]
                   );
                   console.error("Admin mail error:", mailErr.message);
                 }
               }
 
+              // ── THE MISSING BRACKETS WERE HERE ──
               res.json({ msg: "Order updated & customer notified" });
             }
           );
@@ -900,6 +898,10 @@ router.put("/orders/:id/address", adminAuth, (req, res) => {
     }
   });
 });
+
+
+
+
 
 module.exports = router;
 module.exports.agphEmailTemplate      = agphEmailTemplate;
