@@ -54,9 +54,10 @@ router.post("/:productId", auth, (req, res) => {
 /* ================= GET MY WISHLIST ================= */
 /* GET /api/wishlist/my */
 
+
 router.get("/my", auth, (req, res) => {
   db.query(
-    `SELECT 
+    `SELECT DISTINCT
         p.id,
         p.title,
         p.slug,
@@ -70,8 +71,7 @@ router.get("/my", auth, (req, res) => {
     LEFT JOIN ebooks e ON e.product_id = p.id
     JOIN product_categories pc ON pc.product_id = p.id
     JOIN categories c ON c.id = pc.category_id
-    WHERE w.user_id = ? AND c.imprint = 'agph'
-    GROUP BY p.id`,
+    WHERE w.user_id = ? AND c.imprint = 'agph'`,
     [req.user.id],
     (err, rows) => {
       if (err) return res.status(500).json(err);
