@@ -6,7 +6,8 @@ const db         = require("../db");
 
 const SECRET = "MY_SECRET_KEY";
 
-const transporter = nodemailer.createTransport({
+// ─── Transporter Setup (AGPH - Default) ───────────────────────────────────────
+const agphTransporter = nodemailer.createTransport({
   host:           process.env.MAIL_HOST || "smtp.gmail.com",
   port:           Number(process.env.MAIL_PORT) || 587,
   secure:         Number(process.env.MAIL_PORT) === 465,
@@ -17,6 +18,21 @@ const transporter = nodemailer.createTransport({
   auth: {
     user: process.env.MAIL_USER,
     pass: process.env.MAIL_PASS,
+  },
+});
+
+// ─── Transporter Setup (AG Classics) ──────────────────────────────────────────
+const agclassicsTransporter = nodemailer.createTransport({
+  host:           process.env.MAIL_HOST || "smtp.gmail.com",
+  port:           Number(process.env.MAIL_PORT) || 587,
+  secure:         Number(process.env.MAIL_PORT) === 465,
+  pool:           true,
+  maxConnections: 1,
+  rateDelta:      2000,
+  rateLimit:      3,
+  auth: {
+    user: process.env.MAIL_AGUSER,
+    pass: process.env.MAIL_AGPASS,
   },
 });
 
@@ -131,19 +147,16 @@ function agphEmailTemplate(unifiedStatus, customer, order, tracking, courier, it
 </head>
 <body style="margin:0; padding:20px; background-color:#f1f5f9; font-family:'Inter', system-ui, sans-serif;">
   <div class="container">
-    <!-- Header -->
     <div class="header">
       <div style="font-size:24px; font-weight:800; color:${TEXT_MAIN}; letter-spacing:-0.5px; margin-bottom:10px;">AGPH <span style="color:${cfg.accent}">BOOKS</span></div>
       <div style="display:inline-block; padding:4px 12px; background:${cfg.accent}15; color:${cfg.accent}; border-radius:20px; font-size:11px; font-weight:800; letter-spacing:1px; margin-bottom:20px;">${cfg.badge}</div>
       <h1 style="margin:0; font-size:28px; color:${TEXT_MAIN};">${cfg.emoji} ${cfg.headline}</h1>
     </div>
 
-    <!-- Body -->
     <div class="content">
       <p style="font-size:16px; color:${TEXT_MAIN}; font-weight:600; margin-top:0;">Hello ${customer.name},</p>
       <p style="font-size:15px; color:${TEXT_MUTED}; line-height:1.6; margin-bottom:30px;">${cfg.body}</p>
 
-      <!-- Items Table -->
       <table width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e2e8f0; border-radius:8px; border-collapse:separate; overflow:hidden;">
         <tr style="background:${BG_SOFT};">
           <th align="left" style="padding:12px 16px; font-size:11px; color:${TEXT_MUTED}; text-transform:uppercase;">Product</th>
@@ -153,7 +166,6 @@ function agphEmailTemplate(unifiedStatus, customer, order, tracking, courier, it
         ${itemRowsHTML}
       </table>
 
-      <!-- Summary -->
       <div style="margin-top:24px; padding:20px; background:${BG_SOFT}; border-radius:8px;">
         <table width="100%">
           <tr><td style="font-size:14px; color:${TEXT_MUTED};">Order ID</td><td align="right" style="font-size:14px; font-weight:700; color:${TEXT_MAIN};">#${order.id}</td></tr>
@@ -170,7 +182,6 @@ function agphEmailTemplate(unifiedStatus, customer, order, tracking, courier, it
       </div>` : ''}
     </div>
 
-    <!-- Footer -->
     <div class="footer">
       <p style="margin:0 0 10px; font-weight:700; color:#ffffff;">AGPH Books Store</p>
       <p style="margin:0;">You are receiving this because you made a purchase at store.agphbooks.com</p>
@@ -257,7 +268,6 @@ function agClassicsEmailTemplate(unifiedStatus, customer, order, tracking, couri
   }).join("");
 
   const itemsTableHTML = items.length > 0 ? `
-    <!-- Items -->
     <p style="margin:0 0 10px;font-size:11px;font-weight:700;color:#2d2d2d;text-transform:uppercase;letter-spacing:3px;">Items Ordered</p>
     <table width="100%" cellpadding="0" cellspacing="0"
       style="border:1px solid rgba(201,168,76,0.15);border-radius:6px;overflow:hidden;margin-bottom:28px;border-collapse:separate;border-spacing:0;background:${DARK2};">
@@ -324,7 +334,7 @@ function agClassicsEmailTemplate(unifiedStatus, customer, order, tracking, couri
         <p style="margin:0 0 6px;font-size:11px;font-weight:700;color:#8b3a3a;text-transform:uppercase;letter-spacing:2px;">Cancellation Notice</p>
         <p style="margin:0;font-size:12px;color:#a37070;line-height:1.8;">
           If a payment was made, a refund will be processed to your original payment method within <strong style="color:#c09090;">5–7 business days</strong>.<br>
-          Questions? Write to us at <a href="mailto:editor@agclassics.in" style="color:#8b3a3a;font-weight:600;">editor@agclassics.in</a>
+          Questions? Write to us at <a href="mailto:orders@agclassics.in" style="color:#8b3a3a;font-weight:600;">orders@agclassics.in</a>
         </p>
       </td></tr>
     </table>` : "";
@@ -355,23 +365,18 @@ function agClassicsEmailTemplate(unifiedStatus, customer, order, tracking, couri
       <table width="580" cellpadding="0" cellspacing="0"
         style="max-width:580px;width:100%;background:${DARK};border-radius:4px;overflow:hidden;">
 
-        <!-- ══ TOP GOLD LINE ══ -->
         <tr><td style="height:2px;background:linear-gradient(to right,transparent,${GOLD},transparent);"></td></tr>
 
-        <!-- ══ HEADER ══ -->
         <tr><td style="padding:36px 40px 28px;background:${DARK};">
           <table width="100%" cellpadding="0" cellspacing="0">
             <tr>
               <td>
-                <!-- Brand -->
                 <p style="margin:0 0 24px;font-size:11px;font-weight:400;color:${GOLD};letter-spacing:6px;text-transform:uppercase;">AG Classics</p>
-                <!-- Badge -->
                 <table cellpadding="0" cellspacing="0" style="margin-bottom:18px;">
                   <tr><td style="border:1px solid rgba(201,168,76,0.3);padding:4px 12px;border-radius:3px;">
                     <span style="font-size:11px;font-weight:700;color:${GOLD};letter-spacing:3px;text-transform:uppercase;">${cfg.badge}</span>
                   </td></tr>
                 </table>
-                <!-- Headline -->
                 <p style="margin:0 0 6px;font-size:30px;font-weight:300;color:${GOLD};font-family:Georgia,'Times New Roman',serif;line-height:1.2;font-style:italic;">${cfg.headline}</p>
                 <p style="margin:0;font-size:11px;color:${GOLD};font-family:monospace;letter-spacing:1px;">Order #${order.id}</p>
               </td>
@@ -379,23 +384,17 @@ function agClassicsEmailTemplate(unifiedStatus, customer, order, tracking, couri
           </table>
         </td></tr>
 
-        <!-- ══ BODY ══ -->
         <tr><td style="padding:32px 40px 36px;background:${DARK2};">
 
-          <!-- Greeting -->
           <p style="margin:0 0 6px;font-size:18px;font-weight:300;color:${LIGHT};font-family:Georgia,serif;font-style:italic;">Dear ${customer.name},</p>
           <p style="margin:0 0 32px;font-size:13px;color:#8a8a8a;line-height:1.9;">${cfg.body}</p>
 
-          <!-- Cancellation notice -->
           ${cancelNoteHTML}
 
-          <!-- Items -->
           ${itemsTableHTML}
 
-          <!-- Summary -->
           ${summaryHTML}
 
-          <!-- Review CTA — delivered only -->
           ${unifiedStatus === "delivered" ? `
           <table width="100%" cellpadding="0" cellspacing="0"
             style="border:1px solid rgba(201,168,76,0.2);background:rgba(201,168,76,0.03);border-radius:4px;margin-bottom:28px;border-collapse:collapse;">
@@ -410,15 +409,13 @@ function agClassicsEmailTemplate(unifiedStatus, customer, order, tracking, couri
 
           ${ornament}
 
-          <!-- Help -->
           <p style="margin:0;font-size:11px;color:#3a3a3e;line-height:1.9;text-align:center;">
             Need assistance? Write to us at
-            <a href="mailto:editor@agclassics.in" style="color:${GOLD};text-decoration:none;font-weight:600;">editor@agclassics.in</a>
+            <a href="mailto:orders@agclassics.in" style="color:${GOLD};text-decoration:none;font-weight:600;">orders@agclassics.in</a>
           </p>
 
         </td></tr>
 
-        <!-- ══ FOOTER ══ -->
         <tr><td style="padding:20px 40px;background:${DARK};">
           <table width="100%" cellpadding="0" cellspacing="0">
             <tr>
@@ -427,13 +424,12 @@ function agClassicsEmailTemplate(unifiedStatus, customer, order, tracking, couri
                 <p style="margin:0;font-size:10px;color:${GOLD};">© ${new Date().getFullYear()} All rights reserved.</p>
               </td>
               <td align="right" style="vertical-align:middle;">
-                <a href="mailto:editor@agclassics.in" style="font-size:10px;color:${GOLD};text-decoration:none;letter-spacing:1px;">editor@agclassics.in</a>
+                <a href="mailto:orders@agclassics.in" style="font-size:10px;color:${GOLD};text-decoration:none;letter-spacing:1px;">orders@agclassics.in</a>
               </td>
             </tr>
           </table>
         </td></tr>
 
-        <!-- ══ BOTTOM GOLD LINE ══ -->
         <tr><td style="height:2px;background:linear-gradient(to right,transparent,${GOLD},transparent);"></td></tr>
 
       </table>
@@ -708,8 +704,16 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
               // 7. Send customer emails
               for (const email of emails) {
                 try {
-                  const info = await transporter.sendMail({
-                    from: `"${email.brand === "agclassics" ? "AG Classics" : "AGPH Books Store"}" <${process.env.MAIL_USER}>`,
+                  // ───────────────────────────────────────────────────────────
+                  // DYNAMIC TRANSPORTER LOGIC
+                  // ───────────────────────────────────────────────────────────
+                  const isClassics = email.brand === "agclassics";
+                  const activeTransporter = isClassics ? agclassicsTransporter : agphTransporter;
+                  const fromEmail = isClassics ? process.env.MAIL_AGUSER : process.env.MAIL_USER;
+                  const fromName = isClassics ? "AG Classics" : "AGPH Books Store";
+
+                  const info = await activeTransporter.sendMail({
+                    from: `"${fromName}" <${fromEmail}>`,
                     to: customer.email,
                     subject: email.subject,
                     html: email.html,
@@ -770,7 +774,7 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
                 const adminSubject = `[New Order] #${order.id} — ₹${order.total_amount} — ${customer.name}`;
 
                 try {
-                  const adminInfo = await transporter.sendMail({
+                  const adminInfo = await agphTransporter.sendMail({
                     from: `"AGPH Books Store" <${process.env.MAIL_USER}>`,
                     to: process.env.ADMIN_MAIL,
                     subject: adminSubject,
@@ -846,7 +850,6 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
                 }
               }
 
-              // ── THE MISSING BRACKETS WERE HERE ──
               res.json({ msg: "Order updated & customer notified" });
             }
           );
@@ -898,10 +901,6 @@ router.put("/orders/:id/address", adminAuth, (req, res) => {
     }
   });
 });
-
-
-
-
 
 module.exports = router;
 module.exports.agphEmailTemplate      = agphEmailTemplate;
