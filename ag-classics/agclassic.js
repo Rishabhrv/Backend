@@ -314,7 +314,43 @@ router.get("/:slug/reviews", async (req, res) => {
   }
 });
 
+/* GET /api/ag-classics/:slug/preview 
+  Public route to stream the EPUB file for the preview reader 
+*/
+router.get("/:slug/preview", async (req, res) => {
+  try {
+    const { slug } = req.params;
 
+    const sql = `
+      SELECT e.file_path
+      FROM ebooks e
+      JOIN products p ON p.id = e.product_id
+      WHERE p.slug = ? AND p.status = 'published'
+      LIMIT 1
+    `;
+
+    const [rows] = await db.promise().query(sql, [slug]);
+
+    if (!rows.length || !rows[0].file_path) {
+      return res.status(404).json({ success: false, message: "Preview not available" });
+    }
+
+    // You will need to require "path" and "fs" at the top of your router file if not already done
+    const fs = require('fs');
+    const path = require('path');
+    const epubPath = path.join(__dirname, "..", rows[0].file_path);
+
+    if (!fs.existsSync(epubPath)) {
+      return res.status(404).json({ success: false, message: "EPUB file not found" });
+    }
+
+    res.setHeader("Content-Type", "application/epub+zip");
+    res.sendFile(epubPath);
+  } catch (error) {
+    console.error("Preview Error:", error);
+    res.status(500).json({ success: false, message: "Server error serving preview" });
+  }
+});
 
 
 module.exports = router;
