@@ -271,7 +271,9 @@ router.post(
     const imagePath = req.files.image ? `/uploads/products/${req.files.image[0].filename}` : (req.body.image_url || null);
     const ebookCoverPath = req.files?.ebook_cover ? `/uploads/products/${req.files.ebook_cover[0].filename}` : null;
 
-    const slug = generateSlug(title);
+    const slug = (req.body.slug && req.body.slug.trim() !== "") 
+      ? generateSlug(req.body.slug) 
+      : generateSlug(title);
 
     let isbn = null;
     let no_of_pages = null;
