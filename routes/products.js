@@ -273,7 +273,6 @@ router.post(
 
     const slug = generateSlug(title);
 
-    // ── NEW: Extract Fixed Attributes Before Insert ──
     let isbn = null;
     let no_of_pages = null;
     let publication_date = null;
@@ -291,133 +290,144 @@ router.post(
       if (dateAttr?.values?.trim()) publication_date = parseDate(dateAttr.values);
     }
 
-    // Include the 3 new fields in the insert query
-    const productSql = `
-      INSERT INTO products
-      (title, slug, description, price, sell_price, stock, sku, product_type, status, main_image, book_id, isbn, no_of_pages, publication_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
+    const executeInsert = () => {
+      const productSql = `
+        INSERT INTO products
+        (title, slug, description, price, sell_price, stock, sku, product_type, status, main_image, book_id, isbn, no_of_pages, publication_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
 
-    db.query(
-      productSql,
-      [title, slug, description, price, sell_price, stock, sku, product_type, status, imagePath, book_id || null, isbn, no_of_pages, publication_date],
-      (err, result) => {
-        if (err) return res.status(500).json({ message: err.message });
+      db.query(
+        productSql,
+        [title, slug, description, price, sell_price, stock, sku, product_type, status, imagePath, book_id || null, isbn, no_of_pages, publication_date],
+        (err, result) => {
+          if (err) return res.status(500).json({ message: err.message });
 
-        const productId = result.insertId;
+          const productId = result.insertId;
 
-        const saveRelatedData = () => {
-          if (product_type === "physical" || product_type === "both") {
-            db.query(`INSERT INTO shipping_details (product_id, weight, length, width, height) VALUES (?, ?, ?, ?, ?)`, [productId, weight, length, width, height]);
-          }
-          if (req.body.attributes) {
-            const attributes = JSON.parse(req.body.attributes);
-            attributes.forEach((attr) => {
-              const name = attr.name?.trim();
-              const value = attr.values?.trim();
-              if (!name || !value) return;
-              db.query("INSERT IGNORE INTO attributes (name) VALUES (?)", [name], () => {
-                db.query("SELECT id FROM attributes WHERE name = ?", [name], (err, rows) => {
-                  if (err || !rows.length) return;
-                  db.query(`INSERT INTO product_attributes (product_id, attribute_id, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)`, [productId, rows[0].id, value]);
+          const saveRelatedData = () => {
+            if (product_type === "physical" || product_type === "both") {
+              db.query(`INSERT INTO shipping_details (product_id, weight, length, width, height) VALUES (?, ?, ?, ?, ?)`, [productId, weight, length, width, height]);
+            }
+            if (req.body.attributes) {
+              const attributes = JSON.parse(req.body.attributes);
+              attributes.forEach((attr) => {
+                const name = attr.name?.trim();
+                const value = attr.values?.trim();
+                if (!name || !value) return;
+                db.query("INSERT IGNORE INTO attributes (name) VALUES (?)", [name], () => {
+                  db.query("SELECT id FROM attributes WHERE name = ?", [name], (err, rows) => {
+                    if (err || !rows.length) return;
+                    db.query(`INSERT INTO product_attributes (product_id, attribute_id, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)`, [productId, rows[0].id, value]);
+                  });
                 });
               });
-            });
-            // REMOVED old ISBN UPDATE QUERY here since it's now handled in the main INSERT above
-          }
-          if (req.body.categories) {
-            const categories = JSON.parse(req.body.categories);
-            categories.forEach((categoryId) => {
-              db.query(`INSERT IGNORE INTO product_categories (product_id, category_id) VALUES (?, ?)`, [productId, categoryId]);
-            });
-          }
-          if (req.files.gallery) {
-            req.files.gallery.forEach((file, index) => {
-              db.query(`INSERT INTO product_gallery (product_id, image_path, sort_order) VALUES (?, ?, ?)`, [productId, `/uploads/gallery/${file.filename}`, index]);
-            });
-          }
-          if (req.body.galleryUrls) {
-            const galleryUrls = JSON.parse(req.body.galleryUrls);
-            galleryUrls.forEach((urlPath, index) => {
-              db.query(`INSERT INTO product_gallery (product_id, image_path, sort_order) VALUES (?, ?, ?)`, [productId, urlPath, index]);
-            });
-          }
-          if (req.body.subjects) {
-            const subjects = JSON.parse(req.body.subjects);
-            subjects.forEach((subjectId) => {
-              db.query(`INSERT IGNORE INTO product_subjects (product_id, subject_id) VALUES (?, ?)`, [productId, subjectId]);
-            });
-          }
-          const { meta_title, meta_description, keywords } = req.body;
-          if (meta_title || meta_description || keywords) {
-            db.query(`INSERT INTO seo_meta (page_type, page_id, meta_title, meta_description, keywords) VALUES (?, ?, ?, ?, ?)`, ["product", productId, meta_title || null, meta_description || null, keywords || null]);
-          }
-          if (req.body.authors) {
-            const authors = JSON.parse(req.body.authors);
-            authors.forEach((authorId) => {
-              db.query(`INSERT IGNORE INTO product_authors (product_id, author_id) VALUES (?, ?)`, [productId, authorId]);
-            });
-          }
-        };
-
-        if (req.files.ebook) {
-          const ebookFile = req.files.ebook[0];
-          const ext = path.extname(ebookFile.originalname).toLowerCase();
-          const uploadPath = path.join(__dirname, "..", "uploads/ebooks");
-          const originalPath = path.join(uploadPath, ebookFile.filename);
-
-          if (ext === ".epub") {
-            db.query(
-              `INSERT INTO ebooks (product_id, file_path, file_type, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?, ?, ?)`,
-              [productId, `/uploads/ebooks/${ebookFile.filename}`, "epub", ebook_price || null, ebook_sell_price || null, ebookCoverPath],
-              function (err) {
-                if (err) { console.error(err); return res.status(500).json({ message: "Ebook save failed" }); }
-                saveRelatedData();
-                return res.json({ message: "Product created", productId, image: imagePath });
-              }
-            );
-          } else if (ext === ".docx") {
-            mammoth.convertToHtml({ path: originalPath }, {
-              convertImage: mammoth.images.inline(function (element) {
-                return element.read("base64").then(function (imageBuffer) { return { src: "data:" + element.contentType + ";base64," + imageBuffer }; });
-              })
-            }).then(function (result) {
-              const htmlContent = result.value;
-              const epubFilename = ebookFile.filename.replace(".docx", ".epub");
-              const epubPath = path.join(uploadPath, epubFilename);
-              const options = { title: title, author: "Unknown", content: [{ title: title, data: htmlContent }] };
-              return new Epub(options, epubPath).promise.then(function () {
-                fs.unlink(originalPath, function () {});
-                db.query(
-                  `INSERT INTO ebooks (product_id, file_path, file_type, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?, ?, ?)`,
-                  [productId, `/uploads/ebooks/${epubFilename}`, "epub", ebook_price || null, ebook_sell_price || null, ebookCoverPath],
-                  function (err) {
-                    if (err) { console.error(err); return res.status(500).json({ message: "Ebook save failed" }); }
-                    saveRelatedData();
-                    return res.json({ message: "Product created", productId, image: imagePath });
-                  }
-                );
+            }
+            if (req.body.categories) {
+              const categories = JSON.parse(req.body.categories);
+              categories.forEach((categoryId) => {
+                db.query(`INSERT IGNORE INTO product_categories (product_id, category_id) VALUES (?, ?)`, [productId, categoryId]);
               });
-            }).catch(function (err) {
-              console.error("DOCX conversion error:", err);
-              return res.status(500).json({ message: "DOCX conversion failed" });
-            });
+            }
+            if (req.files?.gallery) {
+              req.files.gallery.forEach((file, index) => {
+                db.query(`INSERT INTO product_gallery (product_id, image_path, sort_order) VALUES (?, ?, ?)`, [productId, `/uploads/gallery/${file.filename}`, index]);
+              });
+            }
+            if (req.body.galleryUrls) {
+              const galleryUrls = JSON.parse(req.body.galleryUrls);
+              galleryUrls.forEach((urlPath, index) => {
+                db.query(`INSERT INTO product_gallery (product_id, image_path, sort_order) VALUES (?, ?, ?)`, [productId, urlPath, index]);
+              });
+            }
+            if (req.body.subjects) {
+              const subjects = JSON.parse(req.body.subjects);
+              subjects.forEach((subjectId) => {
+                db.query(`INSERT IGNORE INTO product_subjects (product_id, subject_id) VALUES (?, ?)`, [productId, subjectId]);
+              });
+            }
+            const { meta_title, meta_description, keywords } = req.body;
+            if (meta_title || meta_description || keywords) {
+              db.query(`INSERT INTO seo_meta (page_type, page_id, meta_title, meta_description, keywords) VALUES (?, ?, ?, ?, ?)`, ["product", productId, meta_title || null, meta_description || null, keywords || null]);
+            }
+            if (req.body.authors) {
+              const authors = JSON.parse(req.body.authors);
+              authors.forEach((authorId) => {
+                db.query(`INSERT IGNORE INTO product_authors (product_id, author_id) VALUES (?, ?)`, [productId, authorId]);
+              });
+            }
+          };
+
+          if (req.files?.ebook) {
+            const ebookFile = req.files.ebook[0];
+            const ext = path.extname(ebookFile.originalname).toLowerCase();
+            const uploadPath = path.join(__dirname, "..", "uploads/ebooks");
+            const originalPath = path.join(uploadPath, ebookFile.filename);
+
+            if (ext === ".epub") {
+              db.query(
+                `INSERT INTO ebooks (product_id, file_path, file_type, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?, ?, ?)`,
+                [productId, `/uploads/ebooks/${ebookFile.filename}`, "epub", ebook_price || null, ebook_sell_price || null, ebookCoverPath],
+                function (err) {
+                  if (err) { console.error(err); return res.status(500).json({ message: "Ebook save failed" }); }
+                  saveRelatedData();
+                  return res.json({ message: "Product created", productId, image: imagePath });
+                }
+              );
+            } else if (ext === ".docx") {
+              mammoth.convertToHtml({ path: originalPath }, {
+                convertImage: mammoth.images.inline(function (element) {
+                  return element.read("base64").then(function (imageBuffer) { return { src: "data:" + element.contentType + ";base64," + imageBuffer }; });
+                })
+              }).then(function (result) {
+                const htmlContent = result.value;
+                const epubFilename = ebookFile.filename.replace(".docx", ".epub");
+                const epubPath = path.join(uploadPath, epubFilename);
+                const options = { title: title, author: "Unknown", content: [{ title: title, data: htmlContent }] };
+                return new Epub(options, epubPath).promise.then(function () {
+                  fs.unlink(originalPath, function () {});
+                  db.query(
+                    `INSERT INTO ebooks (product_id, file_path, file_type, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?, ?, ?)`,
+                    [productId, `/uploads/ebooks/${epubFilename}`, "epub", ebook_price || null, ebook_sell_price || null, ebookCoverPath],
+                    function (err) {
+                      if (err) { console.error(err); return res.status(500).json({ message: "Ebook save failed" }); }
+                      saveRelatedData();
+                      return res.json({ message: "Product created", productId, image: imagePath });
+                    }
+                  );
+                });
+              }).catch(function (err) {
+                console.error("DOCX conversion error:", err);
+                return res.status(500).json({ message: "DOCX conversion failed" });
+              });
+            } else {
+              return res.status(400).json({ message: "Only .docx or .epub allowed" });
+            }
           } else {
-            return res.status(400).json({ message: "Only .docx or .epub allowed" });
+            if (ebookCoverPath || ebook_price || ebook_sell_price) {
+               db.query(
+                 `INSERT INTO ebooks (product_id, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?)`,
+                 [productId, ebook_price || null, ebook_sell_price || null, ebookCoverPath]
+               );
+            }
+            saveRelatedData();
+            return res.json({ message: "Product created", productId, image: imagePath });
           }
-        } else {
-          // Fallback: IF no document file, but they provided prices/cover
-          if (ebookCoverPath || ebook_price || ebook_sell_price) {
-             db.query(
-               `INSERT INTO ebooks (product_id, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?)`,
-               [productId, ebook_price || null, ebook_sell_price || null, ebookCoverPath]
-             );
-          }
-          saveRelatedData();
-          return res.json({ message: "Product created", productId, image: imagePath });
         }
-      }
-    );
+      );
+    };
+
+    if (book_id) {
+      db.query("SELECT id FROM products WHERE book_id = ?", [book_id], (err, results) => {
+        if (err) return res.status(500).json({ message: "Database error while checking book_id" });
+        if (results.length > 0) {
+          return res.status(400).json({ message: "A product with this MIS Book ID already exists." });
+        }
+        executeInsert();
+      });
+    } else {
+      executeInsert();
+    }
   }
 );
 
@@ -610,8 +620,6 @@ router.get("/:id/gallery", (req, res) => {
   });
 });
 
-
-
 /* ================= UPDATE PRODUCT ================= */
 router.put(
   "/:id",
@@ -646,7 +654,6 @@ router.put(
     const imagePath = req.files?.image ? `/uploads/products/${req.files.image[0].filename}` : null;
     const ebookCoverPath = req.files?.ebook_cover ? `/uploads/products/${req.files.ebook_cover[0].filename}` : null;
 
-    // ── NEW: Extract Fixed Attributes Before Update ──
     let isbn = null;
     let no_of_pages = null;
     let publication_date = null;
@@ -664,168 +671,179 @@ router.put(
       if (dateAttr?.values?.trim()) publication_date = parseDate(dateAttr.values);
     }
 
-    const updateSql = `
-      UPDATE products SET
-        title = ?, slug = ?, description = ?, price = ?, sell_price = ?, stock = ?, sku = ?, product_type = ?, status = ?, book_id = ?, updated_at = NOW(),
-        isbn = ?, no_of_pages = ?, publication_date = ?
-        ${imagePath ? ", main_image = ?" : ""}
-      WHERE id = ?
-    `;
+    const executeUpdate = () => {
+      const updateSql = `
+        UPDATE products SET
+          title = ?, slug = ?, description = ?, price = ?, sell_price = ?, stock = ?, sku = ?, product_type = ?, status = ?, book_id = ?, updated_at = NOW(),
+          isbn = ?, no_of_pages = ?, publication_date = ?
+          ${imagePath ? ", main_image = ?" : ""}
+        WHERE id = ?
+      `;
 
-    const params = imagePath
-      ? [title, slug, description, price, sell_price, stock, sku, product_type, status, book_id || null, isbn, no_of_pages, publication_date, imagePath, id]
-      : [title, slug, description, price, sell_price, stock, sku, product_type, status, book_id || null, isbn, no_of_pages, publication_date, id];
+      const params = imagePath
+        ? [title, slug, description, price, sell_price, stock, sku, product_type, status, book_id || null, isbn, no_of_pages, publication_date, imagePath, id]
+        : [title, slug, description, price, sell_price, stock, sku, product_type, status, book_id || null, isbn, no_of_pages, publication_date, id];
 
-    db.query(`SELECT stock FROM products WHERE id = ?`, [id], (err, stockRows) => {
-      const wasOutOfStock = !err && stockRows.length && Number(stockRows[0].stock) === 0;
+      db.query(`SELECT stock FROM products WHERE id = ?`, [id], (err, stockRows) => {
+        const wasOutOfStock = !err && stockRows.length && Number(stockRows[0].stock) === 0;
 
-      db.query(updateSql, params, (err) => {
-        if (err) return res.status(500).json(err);
+        db.query(updateSql, params, (err) => {
+          if (err) return res.status(500).json(err);
 
-        if (wasOutOfStock && stock && parseInt(stock) > 0) {
-          fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/stock-notifications/notify/${id}`, { method: "POST" })
-          .catch((e) => console.error("Notify trigger failed:", e.message));
-        }
-
-        /* ---------------- SHIPPING ---------------- */
-        db.query(`DELETE FROM shipping_details WHERE product_id = ?`, [id], () => {
-          if (product_type === "physical" || product_type === "both") {
-            db.query(`INSERT INTO shipping_details (product_id, weight, length, width, height) VALUES (?, ?, ?, ?, ?)`, [id, weight, length, width, height]);
+          if (wasOutOfStock && stock && parseInt(stock) > 0) {
+            fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/stock-notifications/notify/${id}`, { method: "POST" })
+            .catch((e) => console.error("Notify trigger failed:", e.message));
           }
-        });
 
-        /* ---------------- SEO ---------------- */
-        db.query(`DELETE FROM seo_meta WHERE page_type='product' AND page_id=?`, [id], () => {
-          if (meta_title || meta_description || keywords) {
-            db.query(`INSERT INTO seo_meta (page_type, page_id, meta_title, meta_description, keywords) VALUES ('product', ?, ?, ?, ?)`, [id, meta_title, meta_description, keywords]);
-          }
-        });
-
-        /* ---------------- CATEGORIES ---------------- */
-        db.query(`DELETE FROM product_categories WHERE product_id = ?`, [id], () => {
-          if (categories) {
-            JSON.parse(categories).forEach((catId) => {
-              db.query(`INSERT INTO product_categories (product_id, category_id) VALUES (?, ?)`, [id, catId]);
-            });
-          }
-        });
-
-        /* ---------------- ATTRIBUTES ---------------- */
-        db.query(`DELETE FROM product_attributes WHERE product_id = ?`, [id], () => {
-          if (attributes) {
-            JSON.parse(attributes).forEach((attr) => {
-              if (!attr.name || !attr.values) return;
-              db.query(`INSERT IGNORE INTO attributes (name) VALUES (?)`, [attr.name], () => {
-                db.query(`SELECT id FROM attributes WHERE name = ?`, [attr.name], (err, rows) => {
-                  if (!rows?.length) return;
-                  db.query(`INSERT INTO product_attributes (product_id, attribute_id, value) VALUES (?, ?, ?)`, [id, rows[0].id, attr.values]);
-                });
-              });
-            });
-            // REMOVED old ISBN UPDATE QUERY here since it's now handled in the main UPDATE above
-          }
-        });
-
-        /* ---------------- AUTHORS ---------------- */
-        db.query(`DELETE FROM product_authors WHERE product_id = ?`, [id], () => {
-          if (authors) {
-            JSON.parse(authors).forEach((authorId) => {
-              db.query(`INSERT INTO product_authors (product_id, author_id) VALUES (?, ?)`, [id, authorId]);
-            });
-          }
-        });
-
-        /* ---------------- SUBJECTS ---------------- */
-        db.query(`DELETE FROM product_subjects WHERE product_id = ?`, [id], () => {
-          if (req.body.subjects) {
-            JSON.parse(req.body.subjects).forEach((subjectId) => {
-              db.query(`INSERT IGNORE INTO product_subjects (product_id, subject_id) VALUES (?, ?)`, [id, subjectId]);
-            });
-          }
-        });
-
-        /* ---------------- EBOOK ---------------- */
-        if (product_type === "ebook" || product_type === "both") {
-          // Fetch existing cover to make sure we don't accidentally wipe it
-          db.query(`SELECT ebook_cover FROM ebooks WHERE product_id = ?`, [id], (err, coverRows) => {
-            const existingCover = coverRows?.length ? coverRows[0].ebook_cover : null;
-            const finalCoverPath = ebookCoverPath || existingCover;
-
-            if (req.files?.ebook) {
-              const ebookFile = req.files.ebook[0];
-              const ext = path.extname(ebookFile.originalname).toLowerCase();
-              const uploadPath = path.join(__dirname, "..", "uploads/ebooks");
-              const originalPath = path.join(uploadPath, ebookFile.filename);
-
-              db.query(`DELETE FROM ebooks WHERE product_id = ?`, [id], function () {
-                if (ext === ".epub") {
-                  db.query(
-                    `INSERT INTO ebooks (product_id, file_path, file_type, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?, ?, ?)`,
-                    [id, `/uploads/ebooks/${ebookFile.filename}`, "epub", ebook_price || null, ebook_sell_price || null, finalCoverPath]
-                  );
-                } else if (ext === ".docx") {
-                  convertDocxToEpub({ originalPath, uploadPath, ebookFile, title }, function (error, result) {
-                    if (error) return res.status(500).json({ message: "EPUB conversion failed", error: error.message });
-                    fs.unlink(originalPath, () => {});
-                    db.query(
-                      `INSERT INTO ebooks (product_id, file_path, file_type, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?, ?, ?)`,
-                      [id, `/uploads/ebooks/${result.epubFilename}`, "epub", ebook_price || null, ebook_sell_price || null, finalCoverPath],
-                      function (err) {
-                        if (err) return res.status(500).json({ message: "DB insert failed" });
-                        res.json({ message: "Product fully updated", epub_created: true });
-                      }
-                    );
-                  });
-                } else {
-                  console.log("Unsupported ebook format");
-                }
-              });
-            } else {
-              // Updates price and optionally cover if a new cover was uploaded without a new ebook file
-              if (coverRows?.length > 0) {
-                 db.query(
-                   `UPDATE ebooks SET price = ?, sell_price = ?, ebook_cover = ? WHERE product_id = ?`, 
-                   [ebook_price || null, ebook_sell_price || null, finalCoverPath, id]
-                 );
-              } else {
-                 db.query(
-                   `INSERT INTO ebooks (product_id, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?)`,
-                   [id, ebook_price || null, ebook_sell_price || null, finalCoverPath]
-                 );
-              }
+          /* ---------------- SHIPPING ---------------- */
+          db.query(`DELETE FROM shipping_details WHERE product_id = ?`, [id], () => {
+            if (product_type === "physical" || product_type === "both") {
+              db.query(`INSERT INTO shipping_details (product_id, weight, length, width, height) VALUES (?, ?, ?, ?, ?)`, [id, weight, length, width, height]);
             }
           });
-        }
 
-        /* ---------------- GALLERY ---------------- */
-        if (req.body.deletedGallery) {
-          const deleted = JSON.parse(req.body.deletedGallery);
-          if (deleted.length) {
-            db.query(`DELETE FROM product_gallery WHERE id IN (?) AND product_id = ?`, [deleted, id]);
-          }
-        }
-
-        if (req.body.existingGallery) {
-          const existing = JSON.parse(req.body.existingGallery);
-          existing.forEach(img => {
-            db.query(`UPDATE product_gallery SET sort_order = ? WHERE id = ? AND product_id = ?`, [img.sort_order, img.id, id]);
+          /* ---------------- SEO ---------------- */
+          db.query(`DELETE FROM seo_meta WHERE page_type='product' AND page_id=?`, [id], () => {
+            if (meta_title || meta_description || keywords) {
+              db.query(`INSERT INTO seo_meta (page_type, page_id, meta_title, meta_description, keywords) VALUES ('product', ?, ?, ?, ?)`, [id, meta_title, meta_description, keywords]);
+            }
           });
-        }
 
-        if (req.files?.gallery) {
-          db.query(`SELECT COALESCE(MAX(sort_order), -1) AS maxOrder FROM product_gallery WHERE product_id = ?`, [id], (err, rows) => {
-            let start = rows[0].maxOrder + 1;
-            req.files.gallery.forEach((file, index) => {
-              db.query(`INSERT INTO product_gallery (product_id, image_path, sort_order) VALUES (?, ?, ?)`, [id, `/uploads/gallery/${file.filename}`, start + index]);
+          /* ---------------- CATEGORIES ---------------- */
+          db.query(`DELETE FROM product_categories WHERE product_id = ?`, [id], () => {
+            if (categories) {
+              JSON.parse(categories).forEach((catId) => {
+                db.query(`INSERT INTO product_categories (product_id, category_id) VALUES (?, ?)`, [id, catId]);
+              });
+            }
+          });
+
+          /* ---------------- ATTRIBUTES ---------------- */
+          db.query(`DELETE FROM product_attributes WHERE product_id = ?`, [id], () => {
+            if (attributes) {
+              JSON.parse(attributes).forEach((attr) => {
+                if (!attr.name || !attr.values) return;
+                db.query(`INSERT IGNORE INTO attributes (name) VALUES (?)`, [attr.name], () => {
+                  db.query(`SELECT id FROM attributes WHERE name = ?`, [attr.name], (err, rows) => {
+                    if (!rows?.length) return;
+                    db.query(`INSERT INTO product_attributes (product_id, attribute_id, value) VALUES (?, ?, ?)`, [id, rows[0].id, attr.values]);
+                  });
+                });
+              });
+            }
+          });
+
+          /* ---------------- AUTHORS ---------------- */
+          db.query(`DELETE FROM product_authors WHERE product_id = ?`, [id], () => {
+            if (authors) {
+              JSON.parse(authors).forEach((authorId) => {
+                db.query(`INSERT INTO product_authors (product_id, author_id) VALUES (?, ?)`, [id, authorId]);
+              });
+            }
+          });
+
+          /* ---------------- SUBJECTS ---------------- */
+          db.query(`DELETE FROM product_subjects WHERE product_id = ?`, [id], () => {
+            if (req.body.subjects) {
+              JSON.parse(req.body.subjects).forEach((subjectId) => {
+                db.query(`INSERT IGNORE INTO product_subjects (product_id, subject_id) VALUES (?, ?)`, [id, subjectId]);
+              });
+            }
+          });
+
+          /* ---------------- EBOOK ---------------- */
+          if (product_type === "ebook" || product_type === "both") {
+            db.query(`SELECT ebook_cover FROM ebooks WHERE product_id = ?`, [id], (err, coverRows) => {
+              const existingCover = coverRows?.length ? coverRows[0].ebook_cover : null;
+              const finalCoverPath = ebookCoverPath || existingCover;
+
+              if (req.files?.ebook) {
+                const ebookFile = req.files.ebook[0];
+                const ext = path.extname(ebookFile.originalname).toLowerCase();
+                const uploadPath = path.join(__dirname, "..", "uploads/ebooks");
+                const originalPath = path.join(uploadPath, ebookFile.filename);
+
+                db.query(`DELETE FROM ebooks WHERE product_id = ?`, [id], function () {
+                  if (ext === ".epub") {
+                    db.query(
+                      `INSERT INTO ebooks (product_id, file_path, file_type, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?, ?, ?)`,
+                      [id, `/uploads/ebooks/${ebookFile.filename}`, "epub", ebook_price || null, ebook_sell_price || null, finalCoverPath]
+                    );
+                  } else if (ext === ".docx") {
+                    convertDocxToEpub({ originalPath, uploadPath, ebookFile, title }, function (error, result) {
+                      if (error) return res.status(500).json({ message: "EPUB conversion failed", error: error.message });
+                      fs.unlink(originalPath, () => {});
+                      db.query(
+                        `INSERT INTO ebooks (product_id, file_path, file_type, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?, ?, ?)`,
+                        [id, `/uploads/ebooks/${result.epubFilename}`, "epub", ebook_price || null, ebook_sell_price || null, finalCoverPath],
+                        function (err) {
+                          if (err) return res.status(500).json({ message: "DB insert failed" });
+                          res.json({ message: "Product fully updated", epub_created: true });
+                        }
+                      );
+                    });
+                  } else {
+                    console.log("Unsupported ebook format");
+                  }
+                });
+              } else {
+                if (coverRows?.length > 0) {
+                   db.query(
+                     `UPDATE ebooks SET price = ?, sell_price = ?, ebook_cover = ? WHERE product_id = ?`, 
+                     [ebook_price || null, ebook_sell_price || null, finalCoverPath, id]
+                   );
+                } else {
+                   db.query(
+                     `INSERT INTO ebooks (product_id, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?)`,
+                     [id, ebook_price || null, ebook_sell_price || null, finalCoverPath]
+                   );
+                }
+              }
             });
-          });
-        }
+          }
 
-        if (!req.files?.ebook || (req.files.ebook[0].originalname && !req.files.ebook[0].originalname.endsWith('.docx'))) {
-           res.json({ message: "Product fully updated" });
-        }
+          /* ---------------- GALLERY ---------------- */
+          if (req.body.deletedGallery) {
+            const deleted = JSON.parse(req.body.deletedGallery);
+            if (deleted.length) {
+              db.query(`DELETE FROM product_gallery WHERE id IN (?) AND product_id = ?`, [deleted, id]);
+            }
+          }
+
+          if (req.body.existingGallery) {
+            const existing = JSON.parse(req.body.existingGallery);
+            existing.forEach(img => {
+              db.query(`UPDATE product_gallery SET sort_order = ? WHERE id = ? AND product_id = ?`, [img.sort_order, img.id, id]);
+            });
+          }
+
+          if (req.files?.gallery) {
+            db.query(`SELECT COALESCE(MAX(sort_order), -1) AS maxOrder FROM product_gallery WHERE product_id = ?`, [id], (err, rows) => {
+              let start = rows[0].maxOrder + 1;
+              req.files.gallery.forEach((file, index) => {
+                db.query(`INSERT INTO product_gallery (product_id, image_path, sort_order) VALUES (?, ?, ?)`, [id, `/uploads/gallery/${file.filename}`, start + index]);
+              });
+            });
+          }
+
+          if (!req.files?.ebook || (req.files.ebook[0].originalname && !req.files.ebook[0].originalname.endsWith('.docx'))) {
+             res.json({ message: "Product fully updated" });
+          }
+        });
       });
-    });
+    };
+
+    if (book_id) {
+      db.query("SELECT id FROM products WHERE book_id = ? AND id != ?", [book_id, id], (err, results) => {
+        if (err) return res.status(500).json({ message: "Database error while checking book_id" });
+        if (results.length > 0) {
+          return res.status(400).json({ message: "Another product is already using this MIS Book ID." });
+        }
+        executeUpdate();
+      });
+    } else {
+      executeUpdate();
+    }
   }
 );
 
@@ -952,6 +970,50 @@ router.post("/convert-doc", upload.fields([{ name: "file", maxCount: 1 }, { name
     });
   }
 
+  function createProductIfNeeded(callback) {
+    if (productId) return callback(productId);
+    
+    let isbn = null;
+    let no_of_pages = null;
+    let publication_date = null;
+
+    if (attributes) {
+      const isbnAttr = attributes.find(a => a.name?.toLowerCase() === "isbn");
+      if (isbnAttr?.value?.trim()) isbn = isbnAttr.value.trim();
+
+      const pagesAttr = attributes.find(a => a.name?.toLowerCase() === "no. of pages");
+      if (pagesAttr?.value?.trim()) no_of_pages = parseInt(pagesAttr.value.trim(), 10) || null;
+
+      const dateAttr = attributes.find(a => a.name?.toLowerCase() === "publication date");
+      if (dateAttr?.value?.trim()) publication_date = parseDate(dateAttr.value);
+    }
+
+    const proceedWithCreation = () => {
+      generateDraftSlugIfNeeded((finalSlug) => {
+        db.query(
+          `INSERT INTO products (title, slug, description, price, sell_price, stock, sku, product_type, status, book_id, isbn, no_of_pages, publication_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [title, finalSlug, description, price || null, sell_price || null, stock || null, sku || null, product_type, "draft", book_id || null, isbn, no_of_pages, publication_date],
+          (err, result) => {
+            if (err) return res.status(500).json({ message: err.message });
+            callback(result.insertId);
+          }
+        );
+      });
+    };
+
+    if (book_id) {
+      db.query("SELECT id FROM products WHERE book_id = ?", [book_id], (err, results) => {
+        if (err) return res.status(500).json({ message: "Database error while checking book_id" });
+        if (results.length > 0) {
+          return res.status(400).json({ message: "A product with this MIS Book ID already exists." });
+        }
+        proceedWithCreation();
+      });
+    } else {
+      proceedWithCreation();
+    }
+  }
+
   createProductIfNeeded((finalProductId) => {
     db.query(`INSERT INTO shipping_details (product_id, weight, length, width, height) VALUES (?, ?, ?, ?, ?)`, [finalProductId, weight || null, length || null, width || null, height || null]);
     categories.forEach(catId => db.query(`INSERT INTO product_categories (product_id, category_id) VALUES (?, ?)`, [finalProductId, catId]));
@@ -973,36 +1035,6 @@ router.post("/convert-doc", upload.fields([{ name: "file", maxCount: 1 }, { name
       );
     });
   });
-
-  function createProductIfNeeded(callback) {
-    if (productId) return callback(productId);
-    
-    let isbn = null;
-    let no_of_pages = null;
-    let publication_date = null;
-
-    if (attributes) {
-      const isbnAttr = attributes.find(a => a.name?.toLowerCase() === "isbn");
-      if (isbnAttr?.value?.trim()) isbn = isbnAttr.value.trim();
-
-      const pagesAttr = attributes.find(a => a.name?.toLowerCase() === "no. of pages");
-      if (pagesAttr?.value?.trim()) no_of_pages = parseInt(pagesAttr.value.trim(), 10) || null;
-
-      const dateAttr = attributes.find(a => a.name?.toLowerCase() === "publication date");
-      if (dateAttr?.value?.trim()) publication_date = parseDate(dateAttr.value);
-    }
-
-    generateDraftSlugIfNeeded((finalSlug) => {
-      db.query(
-        `INSERT INTO products (title, slug, description, price, sell_price, stock, sku, product_type, status, book_id, isbn, no_of_pages, publication_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [title, finalSlug, description, price || null, sell_price || null, stock || null, sku || null, product_type, "draft", book_id || null, isbn, no_of_pages, publication_date],
-        (err, result) => {
-          if (err) return res.status(500).json({ message: err.message });
-          callback(result.insertId);
-        }
-      );
-    });
-  }
 });
 
 module.exports = router;

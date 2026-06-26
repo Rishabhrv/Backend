@@ -155,7 +155,6 @@ router.put("/:id", upload.single("profile_image"), (req, res) => {
 
   const slug = generateSlug(name);
 
-
   const imagePath = req.file
     ? `/uploads/authors/${req.file.filename}`
     : null;
@@ -182,7 +181,11 @@ router.put("/:id", upload.single("profile_image"), (req, res) => {
       return res.status(500).json(err);
     }
 
-    res.json({ message: "Author updated successfully" });
+    // 🔴 IMPORTANT: Pass the imagePath back to the frontend so React can update the UI preview
+    res.json({ 
+      message: "Author updated successfully",
+      profile_image: imagePath 
+    });
   });
 });
 
