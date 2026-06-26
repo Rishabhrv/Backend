@@ -371,7 +371,7 @@ router.post(
                 function (err) {
                   if (err) { console.error(err); return res.status(500).json({ message: "Ebook save failed" }); }
                   saveRelatedData();
-                  return res.json({ message: "Product created", productId, image: imagePath });
+                  return res.json({ message: "Product created", productId, image: imagePath, slug });
                 }
               );
             } else if (ext === ".docx") {
@@ -392,7 +392,7 @@ router.post(
                     function (err) {
                       if (err) { console.error(err); return res.status(500).json({ message: "Ebook save failed" }); }
                       saveRelatedData();
-                      return res.json({ message: "Product created", productId, image: imagePath });
+                      return res.json({ message: "Product created", productId, image: imagePath, slug });
                     }
                   );
                 });
@@ -411,7 +411,7 @@ router.post(
                );
             }
             saveRelatedData();
-            return res.json({ message: "Product created", productId, image: imagePath });
+            return res.json({ message: "Product created", productId, image: imagePath, slug });
           }
         }
       );
