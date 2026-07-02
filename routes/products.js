@@ -271,7 +271,9 @@ router.post(
     const imagePath = req.files.image ? `/uploads/products/${req.files.image[0].filename}` : (req.body.image_url || null);
     const ebookCoverPath = req.files?.ebook_cover ? `/uploads/products/${req.files.ebook_cover[0].filename}` : null;
 
-    const slug = generateSlug(title);
+    const slug = (req.body.slug && req.body.slug.trim() !== "") 
+      ? generateSlug(req.body.slug) 
+      : generateSlug(title);
 
     let isbn = null;
     let no_of_pages = null;
@@ -1033,6 +1035,56 @@ router.post("/convert-doc", upload.fields([{ name: "file", maxCount: 1 }, { name
           res.json({ message: "Product created & converted", epubPath, productId: finalProductId });
         }
       );
+    });
+  });
+});
+
+
+/* ================= GET PRODUCT ASSETS FOR AMAZON ================= */
+router.get("/:book_id/amazon-assets", (req, res) => {
+  const { book_id } = req.params;
+
+  // 1. Fetch Title, Description, Main Image, sell_price AND the primary 'id'
+  const productSql = `
+    SELECT id, title, description, main_image, sell_price 
+    FROM products 
+    WHERE book_id = ?
+  `;
+
+  db.query(productSql, [book_id], (err, productRows) => {
+    if (err) return res.status(500).json({ success: false, message: "Database error fetching product", error: err });
+    if (!productRows.length) return res.status(404).json({ success: false, message: "Product not found" });
+
+    const product = productRows[0];
+    const primaryId = product.id; 
+
+    // 2. Fetch Gallery Images using the primary 'id'
+    const gallerySql = `
+      SELECT image_path 
+      FROM product_gallery 
+      WHERE product_id = ? 
+      ORDER BY sort_order ASC 
+      LIMIT 3
+    `;
+
+    db.query(gallerySql, [primaryId], (err, galleryRows) => {
+      if (err) return res.status(500).json({ success: false, message: "Database error fetching gallery", error: err });
+
+      const gallery = galleryRows.map(row => row.image_path);
+
+      // Return unified response payload including sell_price
+      res.json({
+        success: true,
+        data: {
+          title: product.title || "",
+          description: product.description || "",
+          sell_price: product.sell_price || 0, // <-- Added sell_price here
+          image_url: product.main_image || "",
+          other_image_1: gallery[0] || "",
+          other_image_2: gallery[1] || "",
+          other_image_3: gallery[2] || ""
+        }
+      });
     });
   });
 });
