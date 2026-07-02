@@ -131,7 +131,7 @@ router.get("/:productId/authors", (req, res) => {
 
   db.query(
     `
-    SELECT a.id, a.name, a.profile_image
+    SELECT a.id, a.bio, a.name, a.profile_image
     FROM product_authors pa
     JOIN authors a ON a.id = pa.author_id
     WHERE pa.product_id = ?
@@ -147,13 +147,15 @@ router.get("/:productId/authors", (req, res) => {
 /* UPDATE AUTHOR */
 router.put("/:id", upload.single("profile_image"), (req, res) => {
   const { id } = req.params;
-  const { name, bio, status } = req.body;
+  // Extract slug from req.body
+  const { name, bio, status, slug } = req.body;
 
   if (!name) {
     return res.status(400).json({ message: "Author name required" });
   }
 
-  const slug = generateSlug(name);
+  // Use the provided slug, OR generate a new one if it's missing
+  const finalSlug = slug ? slug : generateSlug(name);
 
   const imagePath = req.file
     ? `/uploads/authors/${req.file.filename}`
@@ -170,8 +172,8 @@ router.put("/:id", upload.single("profile_image"), (req, res) => {
   `;
 
   const params = imagePath
-    ? [name, slug, bio || null, status || "active", imagePath, id]
-    : [name, slug, bio || null, status || "active", id];
+    ? [name, finalSlug, bio || null, status || "active", imagePath, id]
+    : [name, finalSlug, bio || null, status || "active", id];
 
   db.query(sql, params, (err) => {
     if (err) {
@@ -181,7 +183,6 @@ router.put("/:id", upload.single("profile_image"), (req, res) => {
       return res.status(500).json(err);
     }
 
-    // 🔴 IMPORTANT: Pass the imagePath back to the frontend so React can update the UI preview
     res.json({ 
       message: "Author updated successfully",
       profile_image: imagePath 
