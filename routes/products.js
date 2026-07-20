@@ -24,6 +24,9 @@ const storage = multer.diskStorage({
     else if (file.fieldname === "gallery") {
       uploadPath = process.env.UPLOAD_GALLERY;
     }
+    else if (file.fieldname.startsWith("__FILE__")) {
+      uploadPath = process.env.UPLOAD_SECTIONS;
+    }
 
     if (!uploadPath) {
       return cb(new Error("Invalid upload field"));
@@ -240,16 +243,53 @@ function parseDate(d) {
   return null;
 }
 
+// HELPER: upload.any() returns req.files as a flat array — group it by
+// fieldname so the rest of the code can keep doing fmap.image[0] etc,
+// same shape as the old upload.fields() req.files object.
+function filesByField(reqFiles) {
+  const map = {};
+  (reqFiles || []).forEach((f) => {
+    if (!map[f.fieldname]) map[f.fieldname] = [];
+    map[f.fieldname].push(f);
+  });
+  return map;
+}
+
+// HELPER: Sections arrive with placeholder strings like
+// "__FILE__sec_123__image" wherever a new local file was chosen. This walks
+// each section's data (and nested `items[]` for four_column) and swaps the
+// placeholder for the real uploaded path under /uploads/sections/. Existing
+// paths (edit mode, already "/uploads/...") are left untouched.
+function resolveSectionImages(sections, fmap) {
+  const resolvedPath = (key) => {
+    const f = fmap[key]?.[0];
+    return f ? `/uploads/sections/${f.filename}` : null;
+  };
+  const swap = (obj) => {
+    const next = { ...obj };
+    Object.keys(next).forEach((k) => {
+      if (typeof next[k] === "string" && next[k].startsWith("__FILE__")) {
+        const resolved = resolvedPath(next[k]);
+        if (resolved) next[k] = resolved;
+      }
+    });
+    return next;
+  };
+  return sections.map((section) => {
+    const data = swap(section.data);
+    if (Array.isArray(data.items)) {
+      data.items = data.items.map((item) => swap(item));
+    }
+    return { type: section.type, data };
+  });
+}
+
 /* ================= ADD PRODUCT ================= */
 router.post(
   "/",
-  upload.fields([
-    { name: "image", maxCount: 1 },
-    { name: "ebook", maxCount: 1 },
-    { name: "ebook_cover", maxCount: 1 },
-    { name: "gallery", maxCount: 9 },
-  ]),
+  upload.any(),
   (req, res) => {
+    const fmap = filesByField(req.files);
     let {
       title, description, price, sell_price, stock, sku, product_type,
       status, weight, length, width, height, ebook_price, ebook_sell_price, book_id
@@ -268,12 +308,12 @@ router.post(
     sku = sku || null;
     book_id = book_id || null;
 
-    const imagePath = req.files.image ? `/uploads/products/${req.files.image[0].filename}` : (req.body.image_url || null);
-    const ebookCoverPath = req.files?.ebook_cover ? `/uploads/products/${req.files.ebook_cover[0].filename}` : null;
+    const imagePath = fmap.image ? `/uploads/products/${fmap.image[0].filename}` : (req.body.image_url || null);
+    const ebookCoverPath = fmap.ebook_cover ? `/uploads/products/${fmap.ebook_cover[0].filename}` : null;
 
     const slug = (req.body.slug && req.body.slug.trim() !== "") 
       ? generateSlug(req.body.slug) 
-      : generateSlug(title);
+      : generateSlug(title ? title.split('|')[0].trim() : "");
 
     let isbn = null;
     let no_of_pages = null;
@@ -331,8 +371,8 @@ router.post(
                 db.query(`INSERT IGNORE INTO product_categories (product_id, category_id) VALUES (?, ?)`, [productId, categoryId]);
               });
             }
-            if (req.files?.gallery) {
-              req.files.gallery.forEach((file, index) => {
+            if (fmap.gallery) {
+              fmap.gallery.forEach((file, index) => {
                 db.query(`INSERT INTO product_gallery (product_id, image_path, sort_order) VALUES (?, ?, ?)`, [productId, `/uploads/gallery/${file.filename}`, index]);
               });
             }
@@ -358,10 +398,20 @@ router.post(
                 db.query(`INSERT IGNORE INTO product_authors (product_id, author_id) VALUES (?, ?)`, [productId, authorId]);
               });
             }
+            if (req.body.sections) {
+              const rawSections = JSON.parse(req.body.sections);
+              const sections = resolveSectionImages(rawSections, fmap);
+              sections.forEach((section, index) => {
+                db.query(
+                  `INSERT INTO product_sections (product_id, section_type, sort_order, data) VALUES (?, ?, ?, ?)`,
+                  [productId, section.type, index, JSON.stringify(section.data)]
+                );
+              });
+            }
           };
 
-          if (req.files?.ebook) {
-            const ebookFile = req.files.ebook[0];
+          if (fmap.ebook) {
+            const ebookFile = fmap.ebook[0];
             const ext = path.extname(ebookFile.originalname).toLowerCase();
             const uploadPath = path.join(__dirname, "..", "uploads/ebooks");
             const originalPath = path.join(uploadPath, ebookFile.filename);
@@ -574,7 +624,20 @@ router.get("/slug/:slug", (req, res) => {
             db.query(`SELECT s.id, s.name, s.slug FROM product_subjects ps JOIN subjects s ON s.id = ps.subject_id WHERE ps.product_id = ?`, [product.id], (err, subjects) => {
               if (err) return res.status(500).json({ message: "Subject fetch failed" });
               product.subjects = subjects || [];
-              res.json(product);
+              
+              db.query(
+                `SELECT id, section_type, sort_order, data FROM product_sections WHERE product_id = ? ORDER BY sort_order ASC`,
+                [product.id],
+                (err, sectionRows) => {
+                  if (err) return res.status(500).json({ message: "Sections fetch failed" });
+                  product.sections = (sectionRows || []).map((s) => ({
+                    id: s.id,
+                    type: s.section_type,
+                    data: typeof s.data === "string" ? JSON.parse(s.data) : s.data,
+                  }));
+                  res.json(product);
+                }
+              );
             });
           });
         });
@@ -604,13 +667,26 @@ router.get("/:id", (req, res) => {
   `;
 
   db.query(sql, [id], (err, rows) => {
-    if (err) return res.status(500).json(err);
-    if (!rows.length) return res.status(404).json({ message: "Product not found" });
+  if (err) return res.status(500).json(err);
+  if (!rows.length) return res.status(404).json({ message: "Product not found" });
 
-    const product = rows[0];
-    product.category_ids = product.category_ids ? product.category_ids.split(",").map(Number) : [];
-    res.json(product);
-  });
+  const product = rows[0];
+  product.category_ids = product.category_ids ? product.category_ids.split(",").map(Number) : [];
+
+  db.query(
+    `SELECT id, section_type, sort_order, data FROM product_sections WHERE product_id = ? ORDER BY sort_order ASC`,
+    [id],
+    (err, sectionRows) => {
+      if (err) return res.status(500).json({ message: "Sections fetch failed" });
+      product.sections = (sectionRows || []).map((s) => ({
+        id: s.id,
+        type: s.section_type,
+        data: typeof s.data === "string" ? JSON.parse(s.data) : s.data,
+      }));
+      res.json(product);
+    }
+  );
+});
 });
 
 /* ================= GET PRODUCT GALLERY ================= */
@@ -625,15 +701,11 @@ router.get("/:id/gallery", (req, res) => {
 /* ================= UPDATE PRODUCT ================= */
 router.put(
   "/:id",
-  upload.fields([
-    { name: "image", maxCount: 1 },
-    { name: "ebook", maxCount: 1 },
-    { name: "ebook_cover", maxCount: 1 },
-    { name: "gallery", maxCount: 9 },
-  ]),
+  upload.any(),
   (req, res) => {
     const { id } = req.params;
-    
+    const fmap = filesByField(req.files);
+
     let {
       title, slug, description, price, sell_price, stock, sku, product_type, status,
       weight, length, width, height, meta_title, meta_description, keywords,
@@ -653,8 +725,8 @@ router.put(
     sku = sku || null;
     book_id = book_id || null;
 
-    const imagePath = req.files?.image ? `/uploads/products/${req.files.image[0].filename}` : null;
-    const ebookCoverPath = req.files?.ebook_cover ? `/uploads/products/${req.files.ebook_cover[0].filename}` : null;
+    const imagePath = fmap.image ? `/uploads/products/${fmap.image[0].filename}` : null;
+    const ebookCoverPath = fmap.ebook_cover ? `/uploads/products/${fmap.ebook_cover[0].filename}` : null;
 
     let isbn = null;
     let no_of_pages = null;
@@ -753,14 +825,28 @@ router.put(
             }
           });
 
+          /* ---------------- SECTIONS ---------------- */
+          db.query(`DELETE FROM product_sections WHERE product_id = ?`, [id], () => {
+            if (req.body.sections) {
+              const rawSections = JSON.parse(req.body.sections);
+              const sections = resolveSectionImages(rawSections, fmap);
+              sections.forEach((section, index) => {
+                db.query(
+                  `INSERT INTO product_sections (product_id, section_type, sort_order, data) VALUES (?, ?, ?, ?)`,
+                  [id, section.type, index, JSON.stringify(section.data)]
+                );
+              });
+            }
+          });
+
           /* ---------------- EBOOK ---------------- */
           if (product_type === "ebook" || product_type === "both") {
             db.query(`SELECT ebook_cover FROM ebooks WHERE product_id = ?`, [id], (err, coverRows) => {
               const existingCover = coverRows?.length ? coverRows[0].ebook_cover : null;
               const finalCoverPath = ebookCoverPath || existingCover;
 
-              if (req.files?.ebook) {
-                const ebookFile = req.files.ebook[0];
+              if (fmap.ebook) {
+                const ebookFile = fmap.ebook[0];
                 const ext = path.extname(ebookFile.originalname).toLowerCase();
                 const uploadPath = path.join(__dirname, "..", "uploads/ebooks");
                 const originalPath = path.join(uploadPath, ebookFile.filename);
@@ -819,16 +905,16 @@ router.put(
             });
           }
 
-          if (req.files?.gallery) {
+          if (fmap.gallery) {
             db.query(`SELECT COALESCE(MAX(sort_order), -1) AS maxOrder FROM product_gallery WHERE product_id = ?`, [id], (err, rows) => {
               let start = rows[0].maxOrder + 1;
-              req.files.gallery.forEach((file, index) => {
+              fmap.gallery.forEach((file, index) => {
                 db.query(`INSERT INTO product_gallery (product_id, image_path, sort_order) VALUES (?, ?, ?)`, [id, `/uploads/gallery/${file.filename}`, start + index]);
               });
             });
           }
 
-          if (!req.files?.ebook || (req.files.ebook[0].originalname && !req.files.ebook[0].originalname.endsWith('.docx'))) {
+          if (!fmap.ebook || (fmap.ebook[0].originalname && !fmap.ebook[0].originalname.endsWith('.docx'))) {
              res.json({ message: "Product fully updated" });
           }
         });
