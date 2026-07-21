@@ -16,24 +16,32 @@ const storage = multer.diskStorage({
     let uploadPath = "";
 
     if (file.fieldname === "image" || file.fieldname === "ebook_cover") {
-      uploadPath = process.env.UPLOAD_PRODUCTS;
-    } 
+      uploadPath = process.env.UPLOAD_PRODUCTS || "./uploads/products";
+    }
     else if (file.fieldname === "ebook" || file.fieldname === "file") {
-      uploadPath = process.env.UPLOAD_EBOOKS;
-    } 
+      uploadPath = process.env.UPLOAD_EBOOKS || "./uploads/ebooks";
+    }
     else if (file.fieldname === "gallery") {
-      uploadPath = process.env.UPLOAD_GALLERY;
+      uploadPath = process.env.UPLOAD_GALLERY || "./uploads/gallery";
     }
     else if (file.fieldname.startsWith("__FILE__")) {
-      uploadPath = process.env.UPLOAD_SECTIONS;
+      // ✅ Added fallback path for sections
+      uploadPath = process.env.UPLOAD_SECTIONS || "./uploads/sections";
     }
 
     if (!uploadPath) {
+      console.error(`🚨 Missing upload path for field: ${file.fieldname}`);
       return cb(new Error("Invalid upload field"));
     }
 
-    fs.mkdirSync(uploadPath, { recursive: true });
-    cb(null, uploadPath);
+    // ✅ Try-Catch prevents Linux permission errors from causing a 500 error
+    try {
+      fs.mkdirSync(uploadPath, { recursive: true });
+      cb(null, uploadPath);
+    } catch (err) {
+      console.error(`🚨 Folder Creation Error for ${uploadPath}:`, err.message);
+      cb(new Error("Server permission denied: Could not create upload directory"));
+    }
   },
 
   filename: (req, file, cb) => {
@@ -194,8 +202,8 @@ end
     if (code !== 0) {
       return callback(new Error(stderrOutput));
     }
-    fs.unlink(luaFilterPath, () => {});
-    fs.unlink(cssPath, () => {});
+    fs.unlink(luaFilterPath, () => { });
+    fs.unlink(cssPath, () => { });
     callback(null, { epubFilename, epubPath });
   });
 }
@@ -232,13 +240,13 @@ function parseDate(d) {
   if (!d) return null;
   d = d.trim();
   if (d.includes('/')) {
-      const p = d.split('/');
-      if (p.length === 3) return `${p[2]}-${p[1]}-${p[0]}`;
+    const p = d.split('/');
+    if (p.length === 3) return `${p[2]}-${p[1]}-${p[0]}`;
   } else if (d.includes('-')) {
-      const p = d.split('-');
-      if (p.length === 3) {
-          return p[0].length === 4 ? d : `${p[2]}-${p[1]}-${p[0]}`;
-      }
+    const p = d.split('-');
+    if (p.length === 3) {
+      return p[0].length === 4 ? d : `${p[2]}-${p[1]}-${p[0]}`;
+    }
   }
   return null;
 }
@@ -311,8 +319,8 @@ router.post(
     const imagePath = fmap.image ? `/uploads/products/${fmap.image[0].filename}` : (req.body.image_url || null);
     const ebookCoverPath = fmap.ebook_cover ? `/uploads/products/${fmap.ebook_cover[0].filename}` : null;
 
-    const slug = (req.body.slug && req.body.slug.trim() !== "") 
-      ? generateSlug(req.body.slug) 
+    const slug = (req.body.slug && req.body.slug.trim() !== "")
+      ? generateSlug(req.body.slug)
       : generateSlug(title ? title.split('|')[0].trim() : "");
 
     let isbn = null;
@@ -321,7 +329,7 @@ router.post(
 
     if (req.body.attributes) {
       const parsedAttrs = JSON.parse(req.body.attributes);
-      
+
       const isbnAttr = parsedAttrs.find(a => a.name?.toLowerCase() === "isbn");
       if (isbnAttr?.values?.trim()) isbn = isbnAttr.values.trim();
 
@@ -437,7 +445,7 @@ router.post(
                 const epubPath = path.join(uploadPath, epubFilename);
                 const options = { title: title, author: "Unknown", content: [{ title: title, data: htmlContent }] };
                 return new Epub(options, epubPath).promise.then(function () {
-                  fs.unlink(originalPath, function () {});
+                  fs.unlink(originalPath, function () { });
                   db.query(
                     `INSERT INTO ebooks (product_id, file_path, file_type, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?, ?, ?)`,
                     [productId, `/uploads/ebooks/${epubFilename}`, "epub", ebook_price || null, ebook_sell_price || null, ebookCoverPath],
@@ -457,10 +465,10 @@ router.post(
             }
           } else {
             if (ebookCoverPath || ebook_price || ebook_sell_price) {
-               db.query(
-                 `INSERT INTO ebooks (product_id, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?)`,
-                 [productId, ebook_price || null, ebook_sell_price || null, ebookCoverPath]
-               );
+              db.query(
+                `INSERT INTO ebooks (product_id, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?)`,
+                [productId, ebook_price || null, ebook_sell_price || null, ebookCoverPath]
+              );
             }
             saveRelatedData();
             return res.json({ message: "Product created", productId, image: imagePath, slug });
@@ -624,7 +632,7 @@ router.get("/slug/:slug", (req, res) => {
             db.query(`SELECT s.id, s.name, s.slug FROM product_subjects ps JOIN subjects s ON s.id = ps.subject_id WHERE ps.product_id = ?`, [product.id], (err, subjects) => {
               if (err) return res.status(500).json({ message: "Subject fetch failed" });
               product.subjects = subjects || [];
-              
+
               db.query(
                 `SELECT id, section_type, sort_order, data FROM product_sections WHERE product_id = ? ORDER BY sort_order ASC`,
                 [product.id],
@@ -667,26 +675,26 @@ router.get("/:id", (req, res) => {
   `;
 
   db.query(sql, [id], (err, rows) => {
-  if (err) return res.status(500).json(err);
-  if (!rows.length) return res.status(404).json({ message: "Product not found" });
+    if (err) return res.status(500).json(err);
+    if (!rows.length) return res.status(404).json({ message: "Product not found" });
 
-  const product = rows[0];
-  product.category_ids = product.category_ids ? product.category_ids.split(",").map(Number) : [];
+    const product = rows[0];
+    product.category_ids = product.category_ids ? product.category_ids.split(",").map(Number) : [];
 
-  db.query(
-    `SELECT id, section_type, sort_order, data FROM product_sections WHERE product_id = ? ORDER BY sort_order ASC`,
-    [id],
-    (err, sectionRows) => {
-      if (err) return res.status(500).json({ message: "Sections fetch failed" });
-      product.sections = (sectionRows || []).map((s) => ({
-        id: s.id,
-        type: s.section_type,
-        data: typeof s.data === "string" ? JSON.parse(s.data) : s.data,
-      }));
-      res.json(product);
-    }
-  );
-});
+    db.query(
+      `SELECT id, section_type, sort_order, data FROM product_sections WHERE product_id = ? ORDER BY sort_order ASC`,
+      [id],
+      (err, sectionRows) => {
+        if (err) return res.status(500).json({ message: "Sections fetch failed" });
+        product.sections = (sectionRows || []).map((s) => ({
+          id: s.id,
+          type: s.section_type,
+          data: typeof s.data === "string" ? JSON.parse(s.data) : s.data,
+        }));
+        res.json(product);
+      }
+    );
+  });
 });
 
 /* ================= GET PRODUCT GALLERY ================= */
@@ -734,7 +742,7 @@ router.put(
 
     if (attributes) {
       const parsedAttrs = JSON.parse(attributes);
-      
+
       const isbnAttr = parsedAttrs.find(a => a.name?.toLowerCase() === "isbn");
       if (isbnAttr?.values?.trim()) isbn = isbnAttr.values.trim();
 
@@ -766,7 +774,7 @@ router.put(
 
           if (wasOutOfStock && stock && parseInt(stock) > 0) {
             fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/stock-notifications/notify/${id}`, { method: "POST" })
-            .catch((e) => console.error("Notify trigger failed:", e.message));
+              .catch((e) => console.error("Notify trigger failed:", e.message));
           }
 
           /* ---------------- SHIPPING ---------------- */
@@ -860,7 +868,7 @@ router.put(
                   } else if (ext === ".docx") {
                     convertDocxToEpub({ originalPath, uploadPath, ebookFile, title }, function (error, result) {
                       if (error) return res.status(500).json({ message: "EPUB conversion failed", error: error.message });
-                      fs.unlink(originalPath, () => {});
+                      fs.unlink(originalPath, () => { });
                       db.query(
                         `INSERT INTO ebooks (product_id, file_path, file_type, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?, ?, ?)`,
                         [id, `/uploads/ebooks/${result.epubFilename}`, "epub", ebook_price || null, ebook_sell_price || null, finalCoverPath],
@@ -876,15 +884,15 @@ router.put(
                 });
               } else {
                 if (coverRows?.length > 0) {
-                   db.query(
-                     `UPDATE ebooks SET price = ?, sell_price = ?, ebook_cover = ? WHERE product_id = ?`, 
-                     [ebook_price || null, ebook_sell_price || null, finalCoverPath, id]
-                   );
+                  db.query(
+                    `UPDATE ebooks SET price = ?, sell_price = ?, ebook_cover = ? WHERE product_id = ?`,
+                    [ebook_price || null, ebook_sell_price || null, finalCoverPath, id]
+                  );
                 } else {
-                   db.query(
-                     `INSERT INTO ebooks (product_id, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?)`,
-                     [id, ebook_price || null, ebook_sell_price || null, finalCoverPath]
-                   );
+                  db.query(
+                    `INSERT INTO ebooks (product_id, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?)`,
+                    [id, ebook_price || null, ebook_sell_price || null, finalCoverPath]
+                  );
                 }
               }
             });
@@ -915,7 +923,7 @@ router.put(
           }
 
           if (!fmap.ebook || (fmap.ebook[0].originalname && !fmap.ebook[0].originalname.endsWith('.docx'))) {
-             res.json({ message: "Product fully updated" });
+            res.json({ message: "Product fully updated" });
           }
         });
       });
@@ -984,7 +992,7 @@ router.post("/bulk-category", (req, res) => {
     const values = ids.map((id) => [id, categoryId]);
     db.query(`INSERT INTO product_categories (product_id, category_id) VALUES ?`, [values], (err) => {
       if (err) return res.status(500).json({ message: "Failed to assign category" });
-      
+
       // Force the updated_at timestamp to refresh
       db.query(`UPDATE products SET updated_at = NOW() WHERE id IN (?)`, [ids]);
       res.json({ success: true, message: "Categories updated" });
@@ -1026,7 +1034,7 @@ router.post("/convert-doc", upload.fields([{ name: "file", maxCount: 1 }, { name
 
       db.query(`UPDATE products SET product_type = ?, updated_at = NOW() WHERE id = ?`, [product_type, productId], function (err) {
         if (err) return res.status(500).json({ message: err.message });
-        
+
         db.query(`SELECT id, ebook_cover FROM ebooks WHERE product_id = ?`, [productId], function (err, rows) {
           if (err) return res.status(500).json({ message: err.message });
 
@@ -1038,7 +1046,7 @@ router.post("/convert-doc", upload.fields([{ name: "file", maxCount: 1 }, { name
               [epubPath, ebook_price || null, ebook_sell_price || null, finalCover, productId],
               function (err) {
                 if (err) return res.status(500).json({ message: err.message });
-                fs.unlink(file.path, () => {});
+                fs.unlink(file.path, () => { });
                 return res.json({ message: "Ebook converted & updated", epubPath, productId });
               }
             );
@@ -1048,7 +1056,7 @@ router.post("/convert-doc", upload.fields([{ name: "file", maxCount: 1 }, { name
               [productId, epubPath, ebook_price || null, ebook_sell_price || null, finalCover],
               function (err) {
                 if (err) return res.status(500).json({ message: err.message });
-                fs.unlink(file.path, () => {});
+                fs.unlink(file.path, () => { });
                 return res.json({ message: "Ebook converted & inserted", epubPath, productId });
               }
             );
@@ -1060,7 +1068,7 @@ router.post("/convert-doc", upload.fields([{ name: "file", maxCount: 1 }, { name
 
   function createProductIfNeeded(callback) {
     if (productId) return callback(productId);
-    
+
     let isbn = null;
     let no_of_pages = null;
     let publication_date = null;
@@ -1112,7 +1120,7 @@ router.post("/convert-doc", upload.fields([{ name: "file", maxCount: 1 }, { name
     convertDocxToEpub({ originalPath: file.path, uploadPath: path.dirname(file.path), ebookFile: file, title }, function (error, result) {
       if (error) return res.status(500).json({ message: "Conversion failed", error: error.message });
       const epubPath = `/uploads/ebooks/${result.epubFilename}`;
-      
+
       db.query(
         `INSERT INTO ebooks (product_id, file_path, file_type, price, sell_price, ebook_cover) VALUES (?, ?, ?, ?, ?, ?)`,
         [finalProductId, epubPath, "epub", ebook_price || null, ebook_sell_price || null, ebookCoverPath],
@@ -1142,7 +1150,7 @@ router.get("/:book_id/amazon-assets", (req, res) => {
     if (!productRows.length) return res.status(404).json({ success: false, message: "Product not found" });
 
     const product = productRows[0];
-    const primaryId = product.id; 
+    const primaryId = product.id;
 
     // 2. Fetch Gallery Images using the primary 'id'
     const gallerySql = `
