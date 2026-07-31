@@ -158,13 +158,13 @@ router.post("/create", auth, (req, res) => {
                   [
                     order_id,
                     address.first_name || "",
-                    address.last_name  || "",
-                    address.address    || "",
-                    address.city       || "",
-                    address.state      || "",
-                    address.pincode    || "",
-                    address.phone      || "",
-                    address.email      || "",
+                    address.last_name || "",
+                    address.address || "",
+                    address.city || "",
+                    address.state || "",
+                    address.pincode || "",
+                    address.phone || "",
+                    address.email || "",
                   ],
                   (err) => {
                     if (err) console.error("Order address save error:", err);
@@ -257,60 +257,36 @@ router.post("/create", auth, (req, res) => {
 });
 
 
-
 /* ================================
    🚚 CALCULATE SHIPPING COST
 ================================ */
-router.post("/shipping-cost", auth, (req, res) => {
-  const userId = req.user.id;
-  const { state } = req.body;
+router.post("/shipping-cost", (req, res) => {
+  const { state, items } = req.body;
+  const token = req.headers.authorization?.split(" ")[1];
 
   if (!state) {
     return res.status(400).json({ msg: "State required" });
   }
 
-  // 1️⃣ Get cart with weights
-    const cartSql = `
-      SELECT 
-        c.quantity,
-        sd.weight
-      FROM cart c
-      JOIN shipping_details sd ON sd.product_id = c.product_id
-      JOIN product_categories pc ON pc.product_id = c.product_id
-      JOIN categories cat ON cat.id = pc.category_id
-      WHERE c.user_id = ?
-      AND c.format = 'paperback'
-      AND cat.imprint = 'agph'
-    `;
+  // Centralized cost calculator
+  const calculateCost = (totalWeight) => {
+    if (totalWeight <= 0) return res.json({ shipping: 0, reason: "zero_weight" });
 
-  db.query(cartSql, [userId], (err, items) => {
-    if (err) return res.status(500).json(err);
-    if (!items.length) return res.json({ shipping: 0 });
-
-    // 2️⃣ Total weight
-    let totalWeight = 0;
-    items.forEach(i => {
-      totalWeight += Number(i.weight) * Number(i.quantity);
-    });
-
-    // 3️⃣ Find shipping zone by state
+    // Ensure state strings match regardless of capitalization/spaces
     const zoneSql = `
       SELECT z.id
       FROM shipping_zones z
       JOIN shipping_zone_regions r ON r.zone_id = z.id
-      WHERE r.region_name = ?
+      WHERE LOWER(TRIM(r.region_name)) = LOWER(TRIM(?))
       AND z.status = 'active'
       LIMIT 1
     `;
 
     db.query(zoneSql, [state], (err, zones) => {
-      if (err || !zones.length) {
-        return res.json({ shipping: 0 });
-      }
+      if (err || !zones.length) return res.json({ shipping: 0, reason: "no_zone_found" });
 
       const zoneId = zones[0].id;
 
-      // 4️⃣ Get weight shipping method
       const methodSql = `
         SELECT id FROM shipping_methods
         WHERE zone_id = ?
@@ -320,13 +296,10 @@ router.post("/shipping-cost", auth, (req, res) => {
       `;
 
       db.query(methodSql, [zoneId], (err, methods) => {
-        if (err || !methods.length) {
-          return res.json({ shipping: 0 });
-        }
+        if (err || !methods.length) return res.json({ shipping: 0, reason: "no_method_found" });
 
         const methodId = methods[0].id;
 
-        // 5️⃣ Match weight rule
         const ruleSql = `
           SELECT *
           FROM weight_shipping_rules
@@ -338,9 +311,7 @@ router.post("/shipping-cost", auth, (req, res) => {
         `;
 
         db.query(ruleSql, [methodId, totalWeight, totalWeight], (err, rules) => {
-          if (err || !rules.length) {
-            return res.json({ shipping: 0 });
-          }
+          if (err || !rules.length) return res.json({ shipping: 0, reason: "no_rule_found" });
 
           const r = rules[0];
           let cost = 0;
@@ -349,35 +320,98 @@ router.post("/shipping-cost", auth, (req, res) => {
             case "free":
               cost = 0;
               break;
-
             case "flat":
               cost = Number(r.flat_cost);
               break;
-
             case "progressive":
               cost = totalWeight * Number(r.per_kg_cost);
               break;
-
             case "flat_progressive":
               if (totalWeight <= r.base_weight) {
                 cost = Number(r.base_cost);
               } else {
-                cost =
-                  Number(r.base_cost) +
-                  (totalWeight - r.base_weight) *
-                    Number(r.extra_cost_per_kg);
+                cost = Number(r.base_cost) + ((totalWeight - r.base_weight) * Number(r.extra_cost_per_kg));
               }
               break;
           }
 
-          res.json({
-            shipping: Math.round(cost),
-            totalWeight,
-          });
+          res.json({ shipping: Math.round(cost), totalWeight });
         });
       });
     });
-  });
+  };
+
+  // 1️⃣ Priority: Calculate based on items passed from Frontend
+  if (items && items.length > 0) {
+    const paperbackItems = items.filter(i => i.format === 'paperback');
+    if (!paperbackItems.length) return calculateCost(0);
+
+    const slugs = paperbackItems.map(i => i.slug).filter(Boolean);
+
+    // If no slugs are present, force calculation with fallback weight
+    if (!slugs.length) {
+      let fallbackWeight = 0;
+      paperbackItems.forEach(i => fallbackWeight += 0.5 * Number(i.quantity || 1));
+      return calculateCost(fallbackWeight);
+    }
+
+    // Notice: Removed strict category JOINs to prevent the query from failing silently
+    const cartSql = `
+      SELECT p.slug, sd.weight
+      FROM products p
+      LEFT JOIN shipping_details sd ON sd.product_id = p.id
+      WHERE p.slug IN (?)
+    `;
+
+    db.query(cartSql, [slugs], (err, rows) => {
+      let totalWeight = 0;
+
+      // Loop over frontend items directly so no item is left behind
+      paperbackItems.forEach(cartItem => {
+        let itemWeight = 0.5; // Default fallback to 0.5 kg
+
+        if (!err && rows && rows.length > 0) {
+          const dbMatch = rows.find(r => r.slug === cartItem.slug);
+          if (dbMatch && dbMatch.weight) {
+            itemWeight = Number(dbMatch.weight);
+          }
+        }
+
+        totalWeight += itemWeight * Number(cartItem.quantity || 1);
+      });
+
+      calculateCost(totalWeight);
+    });
+
+  } else if (token) {
+    // 2️⃣ Fallback: Calculate from Database Cart if items weren't passed
+    jwt.verify(token, SECRET, (err, decoded) => {
+      if (err) return calculateCost(0);
+
+      // Removed strict category JOINs here as well
+      const cartSql = `
+        SELECT c.quantity, sd.weight
+        FROM cart c
+        LEFT JOIN shipping_details sd ON sd.product_id = c.product_id
+        WHERE c.user_id = ?
+        AND c.format = 'paperback'
+      `;
+
+      db.query(cartSql, [decoded.id], (err, dbItems) => {
+        if (err || !dbItems.length) return calculateCost(0);
+
+        let totalWeight = 0;
+        dbItems.forEach(i => {
+          const itemWeight = Number(i.weight) || 0.5; // Fallback to 0.5 kg
+          totalWeight += itemWeight * Number(i.quantity);
+        });
+
+        calculateCost(totalWeight);
+      });
+    });
+  } else {
+    calculateCost(0);
+  }
 });
 
 
