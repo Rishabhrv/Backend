@@ -146,7 +146,13 @@ router.post("/create-order", auth, (req, res) => {
      6. Return order_id so frontend can redirect
 ══════════════════════════════════════════════════════════ */
 router.post("/verify", auth, (req, res) => {
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, order_id } = req.body;
+  const {
+    razorpay_order_id,
+    razorpay_payment_id,
+    razorpay_signature,
+    order_id,
+    is_buy_now,
+  } = req.body;
 
   // 1. Signature check
   const expected = crypto
@@ -207,15 +213,20 @@ router.post("/verify", auth, (req, res) => {
             (err) => {
               if (err) console.error("Shipping insert error:", err);          
 
-              // 5. Clear cart
-              db.query("DELETE FROM cart WHERE user_id = ?", [req.user.id], () => {          
-
+              // 5. Clear cart ONLY IF NOT Buy Now
+              const finishOrder = () => {
                 // 6. Send confirmed email — fire and forget, never blocks this response
                 sendOrderConfirmedEmail(order_id);          
 
                 // 7. Respond to frontend with order_id for redirect
                 res.json({ msg: "Payment verified", order_id });
-              });
+              };
+              
+              if (!is_buy_now) {
+                db.query("DELETE FROM cart WHERE user_id = ?", [req.user.id], finishOrder);
+              } else {
+                finishOrder();
+              }
             }
           );
         }
