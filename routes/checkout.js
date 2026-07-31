@@ -79,27 +79,9 @@ router.post("/save-address", auth, (req, res) => {
 /* ================= CREATE ORDER ================= */
 router.post("/create", auth, (req, res) => {
   const user_id = req.user.id;
-    const { shipping = 0, couponCode, address } = req.body;
+  const { shipping = 0, couponCode, address, buyNowItem } = req.body;
 
-
-    const cartSql = `
-      SELECT 
-        c.product_id,
-        c.format,
-        c.quantity,
-        p.sell_price AS paperback_price,
-        e.sell_price AS ebook_price,
-        p.product_type
-      FROM cart c
-      JOIN products p ON p.id = c.product_id
-      LEFT JOIN ebooks e ON e.product_id = p.id
-      JOIN product_categories pc ON pc.product_id = p.id
-      JOIN categories cat ON cat.id = pc.category_id
-      WHERE c.user_id = ?
-      AND cat.imprint = 'agph'
-    `;
-
-  db.query(cartSql, [user_id], (err, items) => {
+  const processItems = (err, items) => {
     if (err) return res.status(500).json(err);
     if (!items || items.length === 0)
       return res.status(400).json({ msg: "Cart empty" });
@@ -237,7 +219,41 @@ router.post("/create", auth, (req, res) => {
         processOrder(Number(discount.toFixed(2)), coupon.id);
       }
     );
-  });
+  }; // end processItems
+
+  if (buyNowItem) {
+    const productSql = `
+      SELECT 
+        p.id AS product_id,
+        ? AS format,
+        ? AS quantity,
+        p.sell_price AS paperback_price,
+        e.sell_price AS ebook_price,
+        p.product_type
+      FROM products p
+      LEFT JOIN ebooks e ON e.product_id = p.id
+      WHERE p.id = ?
+    `;
+    db.query(productSql, [buyNowItem.format, buyNowItem.quantity, buyNowItem.product_id], processItems);
+  } else {
+    const cartSql = `
+      SELECT 
+        c.product_id,
+        c.format,
+        c.quantity,
+        p.sell_price AS paperback_price,
+        e.sell_price AS ebook_price,
+        p.product_type
+      FROM cart c
+      JOIN products p ON p.id = c.product_id
+      LEFT JOIN ebooks e ON e.product_id = p.id
+      JOIN product_categories pc ON pc.product_id = p.id
+      JOIN categories cat ON cat.id = pc.category_id
+      WHERE c.user_id = ?
+      AND cat.imprint = 'agph'
+    `;
+    db.query(cartSql, [user_id], processItems);
+  }
 });
 
 
