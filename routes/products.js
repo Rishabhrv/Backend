@@ -396,6 +396,18 @@ router.post(
                 db.query(`INSERT IGNORE INTO product_subjects (product_id, subject_id) VALUES (?, ?)`, [productId, subjectId]);
               });
             }
+            if (req.body.pixelIds) {
+              try {
+                const pixelIds = JSON.parse(req.body.pixelIds);
+                pixelIds.forEach((pixelId) => {
+                  if (pixelId && pixelId.trim()) {
+                    db.query(`INSERT IGNORE INTO product_pixels (product_id, pixel_id) VALUES (?, ?)`, [productId, pixelId.trim()]);
+                  }
+                });
+              } catch (e) {
+                console.error("Error parsing pixelIds:", e);
+              }
+            }
             const { meta_title, meta_description, keywords } = req.body;
             if (meta_title || meta_description || keywords) {
               db.query(`INSERT INTO seo_meta (page_type, page_id, meta_title, meta_description, keywords) VALUES (?, ?, ?, ?, ?)`, ["product", productId, meta_title || null, meta_description || null, keywords || null]);
@@ -643,7 +655,10 @@ router.get("/slug/:slug", (req, res) => {
                     type: s.section_type,
                     data: typeof s.data === "string" ? JSON.parse(s.data) : s.data,
                   }));
-                  res.json(product);
+                  db.query(`SELECT pixel_id FROM product_pixels WHERE product_id = ? AND status = 'active'`, [product.id], (err, pixels) => {
+                    product.pixel_ids = (pixels || []).map(p => p.pixel_id);
+                    res.json(product);
+                  });
                 }
               );
             });
@@ -691,7 +706,10 @@ router.get("/:id", (req, res) => {
           type: s.section_type,
           data: typeof s.data === "string" ? JSON.parse(s.data) : s.data,
         }));
-        res.json(product);
+        db.query(`SELECT pixel_id FROM product_pixels WHERE product_id = ? AND status = 'active'`, [id], (err, pixels) => {
+          product.pixel_ids = (pixels || []).map((p) => p.pixel_id);
+          res.json(product);
+        });
       }
     );
   });
@@ -830,6 +848,22 @@ router.put(
               JSON.parse(req.body.subjects).forEach((subjectId) => {
                 db.query(`INSERT IGNORE INTO product_subjects (product_id, subject_id) VALUES (?, ?)`, [id, subjectId]);
               });
+            }
+          });
+
+          /* ---------------- PIXEL IDS ---------------- */
+          db.query(`DELETE FROM product_pixels WHERE product_id = ?`, [id], () => {
+            if (req.body.pixelIds) {
+              try {
+                const pixelIds = JSON.parse(req.body.pixelIds);
+                pixelIds.forEach((pixelId) => {
+                  if (pixelId && pixelId.trim()) {
+                    db.query(`INSERT IGNORE INTO product_pixels (product_id, pixel_id) VALUES (?, ?)`, [id, pixelId.trim()]);
+                  }
+                });
+              } catch (e) {
+                console.error("Error parsing pixelIds:", e);
+              }
             }
           });
 
