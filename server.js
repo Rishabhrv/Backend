@@ -5,17 +5,18 @@ const app = express();
 
 app.use(cors());
 app.set('trust proxy', true);
-app.use(express.json()); 
+app.use(express.json());
 
 
 const PORT = process.env.PORT || 5000;
 
 /* ROUTES */
 
+
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/admin", require("./routes/adminAuth"));
-app.use("/api/categories", require("./routes/categories")); 
-app.use("/api/viewcategory", require("./routes/viewcategory")); 
+app.use("/api/categories", require("./routes/categories"));
+app.use("/api/viewcategory", require("./routes/viewcategory"));
 app.use("/api/products", require("./routes/products"));
 app.use("/uploads", express.static("uploads"));
 app.use("/api/media", require("./routes/media"));
@@ -47,7 +48,9 @@ app.use("/api/admin", require("./routes/adminSettings"));
 app.use("/api/admin", require("./routes/abandoned-carts"));
 app.use("/api/admin", require("./routes/adminAnalytics"));
 app.use("/api/admin", require("./routes/adminebookAnalytics"));
+app.use("/api/admin", require("./routes/adminSales"));
 app.use("/api/admin/permissions", require("./routes/adminPermissions"));
+app.use("/api/sales", require("./routes/sales"));
 app.use("/api/subjects", require("./routes/subjects"));
 app.use("/api/mylibrary", require("./routes/mylibrary"));
 app.use("/api/payment-history", require("./routes/payment-history"));
@@ -68,10 +71,10 @@ app.use("/api/ag-classics/orders", require("./ag-classics/orders"));
 app.use("/api/ag-classics/bestseller", require("./ag-classics/bestseller"));
 app.use("/api/ag-classics/products", require("./ag-classics/products"));
 app.use("/api/ag-classics/ebooks", require("./ag-classics/ebooks"));
-app.use("/api/ag-classics/viewcategory", require("./ag-classics/viewcategory")); 
+app.use("/api/ag-classics/viewcategory", require("./ag-classics/viewcategory"));
 app.use("/api/ag-classics/search", require("./ag-classics/search"));
 app.use("/api/ag-classics/checkout", require("./ag-classics/checkout"));
-app.use("/api/ag-classics/coupons",  require("./ag-classics/checkout"));
+app.use("/api/ag-classics/coupons", require("./ag-classics/checkout"));
 app.use("/api/ag-classics/cart", require("./ag-classics/cart"));
 app.use("/api/ag-classics/wishlist", require("./ag-classics/wishlist"));
 app.use("/api/ag-classics", require("./ag-classics/agclassic"));
