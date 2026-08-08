@@ -10,6 +10,57 @@ const nodemailer = require("nodemailer");
 const { shippingEmailTemplate } = require("./adminOrders");
 const { createAdminNotification } = require("./adminnotifications");
 
+// Helper to hash user data for Meta CAPI
+function hashData(data) {
+  if (!data) return undefined;
+  return crypto.createHash('sha256').update(data.trim().toLowerCase()).digest('hex');
+}
+
+// Fire-and-forget function to send Server Event to Meta
+async function sendMetaCAPIEvent(order_id, email, amount, req) {
+  const pixelId = process.env.META_PIXEL_ID;
+  const token = process.env.META_CAPI_TOKEN;
+  if (!pixelId || !token) return;
+
+  const currentTimestamp = Math.floor(Date.now() / 1000);
+  const clientIpAddress = req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress;
+  const clientUserAgent = req.headers['user-agent'];
+
+  const eventData = {
+    data: [
+      {
+        event_name: 'Purchase',
+        event_time: currentTimestamp,
+        action_source: 'website',
+        event_id: String(order_id),
+        user_data: {
+          em: email ? [hashData(email)] : undefined,
+          client_ip_address: clientIpAddress,
+          client_user_agent: clientUserAgent,
+        },
+        custom_data: {
+          currency: 'INR',
+          value: parseFloat(String(amount))
+        }
+      }
+    ]
+  };
+
+  try {
+    const response = await fetch(`https://graph.facebook.com/v19.0/${pixelId}/events?access_token=${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(eventData)
+    });
+    const result = await response.json();
+    if (result.error) {
+      console.error("Meta CAPI Error:", result.error);
+    }
+  } catch (error) {
+    console.error("Meta CAPI Request Failed:", error);
+  }
+}
+
 const SECRET = "MY_SECRET_KEY";
 
 const auth = (req, res, next) => {
@@ -177,7 +228,7 @@ router.post("/verify", auth, (req, res) => {
       // NEW: Trigger Notification ONLY on successful payment verification
       // ─────────────────────────────────────────────────────────────────
       db.query(
-        `SELECT o.total_amount, u.email 
+        `SELECT o.total_amount, u.email, o.coupon_code 
          FROM orders o 
          JOIN users u ON u.id = o.user_id 
          WHERE o.id = ?`,
@@ -190,6 +241,16 @@ router.post("/verify", auth, (req, res) => {
               `Order #${order_id} placed by ${rows[0].email} — ₹${rows[0].total_amount}`,
               order_id
             );
+            sendMetaCAPIEvent(order_id, rows[0].email, rows[0].total_amount, req);
+
+            // Log coupon usage upon successful payment
+            if (rows[0].coupon_code) {
+              db.query(
+                `INSERT INTO coupon_usage (coupon_id, user_id, order_id)
+                 SELECT id, ?, ? FROM coupons WHERE code = ? LIMIT 1`,
+                [req.user.id, order_id, rows[0].coupon_code]
+              );
+            }
           }
         }
       );

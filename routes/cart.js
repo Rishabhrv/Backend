@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const db = require("../db");
 const jwt = require("jsonwebtoken");
+const { applySalesToItems } = require("../utils/salesHelper");
 
 const SECRET = "MY_SECRET_KEY"; 
 
@@ -120,9 +121,15 @@ router.get("/my", auth, (req, res) => {
     WHERE c.user_id = ?
   `;
 
-  db.query(sql, [req.user.id], (err, rows) => {
+  db.query(sql, [req.user.id], async (err, rows) => {
     if (err) return res.status(500).json(err);
-    res.json(rows);
+    try {
+      const processed = await applySalesToItems(req.user.id, rows);
+      res.json(processed);
+    } catch (e) {
+      console.error("Error applying sales to cart:", e);
+      res.json(rows);
+    }
   });
 });
 

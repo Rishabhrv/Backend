@@ -655,8 +655,59 @@ router.get("/slug/:slug", (req, res) => {
                     type: s.section_type,
                     data: typeof s.data === "string" ? JSON.parse(s.data) : s.data,
                   }));
-                  db.query(`SELECT pixel_id FROM product_pixels WHERE product_id = ? AND status = 'active'`, [product.id], (err, pixels) => {
+                  db.query(`SELECT pixel_id FROM product_pixels WHERE product_id = ? AND status = 'active'`, [product.id], async (err, pixels) => {
                     product.pixel_ids = (pixels || []).map(p => p.pixel_id);
+                    
+                    try {
+                      const promiseDb = db.promise();
+                      const [sales] = await promiseDb.query(`
+                        SELECT * FROM sales 
+                        WHERE status = 'active' AND start_date <= NOW() AND end_date >= NOW()
+                        ORDER BY discount_value DESC
+                      `);
+                      
+                      let activeSale = null;
+                      if (sales.length > 0) {
+                        const catIds = product.categories.length > 0 ? product.categories.map(c => c.id) : [0];
+                        const [saleProducts] = await promiseDb.query("SELECT sale_id FROM sale_products WHERE product_id = ?", [product.id]);
+                        const [saleCategories] = await promiseDb.query("SELECT sale_id FROM sale_categories WHERE category_id IN (?)", [catIds]);
+                        
+                        const spSet = new Set(saleProducts.map(sp => sp.sale_id));
+                        const scSet = new Set(saleCategories.map(sc => sc.sale_id));
+                        
+                        for (const sale of sales) {
+                           if (sale.applicable_on === 'all' || 
+                               (sale.applicable_on === 'product' && spSet.has(sale.id)) ||
+                               (sale.applicable_on === 'category' && scSet.has(sale.id))) {
+                               activeSale = sale;
+                               break;
+                           }
+                        }
+                      }
+                      
+                      if (activeSale) {
+                         const applyDiscount = (price) => {
+                             if (!price) return price;
+                             if (activeSale.discount_type === 'percent') {
+                                 return Math.max(0, price - (price * activeSale.discount_value / 100));
+                             } else if (activeSale.discount_type === 'flat') {
+                                 return Math.max(0, price - activeSale.discount_value);
+                             }
+                             return price;
+                         };
+                         product.original_sell_price = product.sell_price;
+                         product.sell_price = applyDiscount(product.sell_price);
+                         
+                         if (product.ebook_sell_price) {
+                             product.original_ebook_sell_price = product.ebook_sell_price;
+                             product.ebook_sell_price = applyDiscount(product.ebook_sell_price);
+                         }
+                         product.active_sale = activeSale;
+                      }
+                    } catch (saleErr) {
+                      console.error("Error applying sale:", saleErr);
+                    }
+                    
                     res.json(product);
                   });
                 }
