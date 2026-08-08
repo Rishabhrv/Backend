@@ -46,6 +46,11 @@ async function sendMetaCAPIEvent(order_id, email, amount, req) {
     ]
   };
 
+  const testEventCode = process.env.META_TEST_EVENT_CODE;
+  if (testEventCode) {
+    eventData.test_event_code = testEventCode;
+  }
+
   try {
     const response = await fetch(`https://graph.facebook.com/v19.0/${pixelId}/events?access_token=${token}`, {
       method: 'POST',

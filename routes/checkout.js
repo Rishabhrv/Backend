@@ -638,13 +638,15 @@ router.post("/apply-coupon", auth, (req, res) => {
                       WHEN ? = 'ebook' THEN e.sell_price
                       ELSE p.sell_price
                     END AS price,
-                    GROUP_CONCAT(DISTINCT pc.category_id) AS categories
+                    (
+                      SELECT GROUP_CONCAT(DISTINCT pc.category_id)
+                      FROM product_categories pc
+                      JOIN categories cat ON cat.id = pc.category_id
+                      WHERE pc.product_id = p.id AND cat.imprint = 'agph'
+                    ) AS categories
                   FROM products p
                   LEFT JOIN ebooks e ON e.product_id = p.id
-                  INNER JOIN product_categories pc ON pc.product_id = p.id
-                  INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
                   WHERE p.id = ?
-                  GROUP BY p.id
                 `;
                 db.query(productSql, [buyNowItem.format, buyNowItem.quantity, buyNowItem.format, buyNowItem.product_id], processItems);
               } else {
@@ -660,14 +662,22 @@ router.post("/apply-coupon", auth, (req, res) => {
                       WHEN c.format = 'ebook' THEN e.sell_price
                       ELSE p.sell_price
                     END AS price,
-                    GROUP_CONCAT(DISTINCT pc.category_id) AS categories
+                    (
+                      SELECT GROUP_CONCAT(DISTINCT pc.category_id)
+                      FROM product_categories pc
+                      JOIN categories cat ON cat.id = pc.category_id
+                      WHERE pc.product_id = p.id AND cat.imprint = 'agph'
+                    ) AS categories
                   FROM cart c
                   JOIN products p ON p.id = c.product_id
                   LEFT JOIN ebooks e ON e.product_id = p.id
-                  INNER JOIN product_categories pc ON pc.product_id = p.id
-                  INNER JOIN categories cat ON cat.id = pc.category_id AND cat.imprint = 'agph'
                   WHERE c.user_id = ?
-                  GROUP BY c.product_id, c.format, price
+                  AND EXISTS (
+                      SELECT 1
+                      FROM product_categories pc
+                      JOIN categories cat ON cat.id = pc.category_id
+                      WHERE pc.product_id = p.id AND cat.imprint = 'agph'
+                  )
                   `,
                   [userId],
                   processItems
