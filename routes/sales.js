@@ -10,7 +10,23 @@ router.get("/active/:productId", async (req, res) => {
 
         // First, find the product's categories if we need to check category-wide sales
         const [productCategories] = await promiseDb.query("SELECT category_id FROM product_categories WHERE product_id = ?", [productId]);
-        const categoryIds = productCategories.map(c => c.category_id);
+        let categoryIds = productCategories.map(c => c.category_id);
+
+        // Fetch category tree to include parent categories (so sales on parents apply to children)
+        const [allCats] = await promiseDb.query("SELECT id, parent_id FROM categories");
+        const parentMap = {};
+        allCats.forEach(c => parentMap[c.id] = c.parent_id);
+        const ancestors = new Set(categoryIds);
+        let queue = [...categoryIds];
+        while(queue.length > 0) {
+            const id = queue.shift();
+            const pId = parentMap[id];
+            if (pId && !ancestors.has(pId)) {
+                ancestors.add(pId);
+                queue.push(pId);
+            }
+        }
+        categoryIds = Array.from(ancestors);
 
         // Find active sales that match this product
         // 1. site-wide (applicable_on = 'all')

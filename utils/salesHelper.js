@@ -31,6 +31,11 @@ async function applySalesToItems(userId, items) {
         [productIds.length > 0 ? productIds : [0]]
     );
 
+    // Fetch category tree to include parent categories (so sales on parents apply to children)
+    const [allCats] = await promiseDb.query("SELECT id, parent_id FROM categories");
+    const parentMap = {};
+    allCats.forEach(c => parentMap[c.id] = c.parent_id);
+
     // Extract usage counts for the user
     const [usages] = await promiseDb.query(
         "SELECT sale_id, product_id, COUNT(*) as count FROM sale_usage WHERE user_id = ? GROUP BY sale_id, product_id",
@@ -44,7 +49,19 @@ async function applySalesToItems(userId, items) {
 
     return items.map(item => {
         // Find applicable sales for this item
-        const itemCats = productCategories.filter(pc => pc.product_id === item.product_id).map(pc => pc.category_id);
+        let itemCats = productCategories.filter(pc => pc.product_id === item.product_id).map(pc => pc.category_id);
+        
+        const ancestors = new Set(itemCats);
+        let queue = [...itemCats];
+        while(queue.length > 0) {
+            const id = queue.shift();
+            const pId = parentMap[id];
+            if (pId && !ancestors.has(pId)) {
+                ancestors.add(pId);
+                queue.push(pId);
+            }
+        }
+        itemCats = Array.from(ancestors);
 
         // Find the best sale
         let bestSale = null;
