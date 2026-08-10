@@ -668,7 +668,24 @@ router.get("/slug/:slug", (req, res) => {
                       
                       let activeSale = null;
                       if (sales.length > 0) {
-                        const catIds = product.categories.length > 0 ? product.categories.map(c => c.id) : [0];
+                        let catIds = product.categories.length > 0 ? product.categories.map(c => c.id) : [];
+                        
+                        const [allCats] = await promiseDb.query("SELECT id, parent_id FROM categories");
+                        const parentMap = {};
+                        allCats.forEach(c => parentMap[c.id] = c.parent_id);
+                        const ancestors = new Set(catIds);
+                        let queue = [...catIds];
+                        while(queue.length > 0) {
+                            const id = queue.shift();
+                            const pId = parentMap[id];
+                            if (pId && !ancestors.has(pId)) {
+                                ancestors.add(pId);
+                                queue.push(pId);
+                            }
+                        }
+                        catIds = Array.from(ancestors);
+                        if (catIds.length === 0) catIds = [0];
+
                         const [saleProducts] = await promiseDb.query("SELECT sale_id FROM sale_products WHERE product_id = ?", [product.id]);
                         const [saleCategories] = await promiseDb.query("SELECT sale_id FROM sale_categories WHERE category_id IN (?)", [catIds]);
                         

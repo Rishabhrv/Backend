@@ -17,7 +17,7 @@ function hashData(data) {
 }
 
 // Fire-and-forget function to send Server Event to Meta
-async function sendMetaCAPIEvent(order_id, email, amount, req) {
+async function sendMetaCAPIEvent(order_id, userObj, amount, req) {
   const pixelId = process.env.META_PIXEL_ID;
   const token = process.env.META_CAPI_TOKEN;
   if (!pixelId || !token) return;
@@ -25,6 +25,9 @@ async function sendMetaCAPIEvent(order_id, email, amount, req) {
   const currentTimestamp = Math.floor(Date.now() / 1000);
   const clientIpAddress = req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress;
   const clientUserAgent = req.headers['user-agent'];
+
+  const cleanPhone = userObj.phone ? userObj.phone.replace(/\D/g, '') : '';
+  const finalPhone = cleanPhone.length > 0 ? (cleanPhone.startsWith('91') ? cleanPhone : '91' + cleanPhone) : '';
 
   const eventData = {
     data: [
@@ -34,13 +37,22 @@ async function sendMetaCAPIEvent(order_id, email, amount, req) {
         action_source: 'website',
         event_id: String(order_id),
         user_data: {
-          em: email ? [hashData(email)] : undefined,
+          em: userObj.email ? [hashData(userObj.email)] : undefined,
+          ph: finalPhone ? [hashData(finalPhone)] : undefined,
+          fn: userObj.first_name ? [hashData(userObj.first_name)] : undefined,
+          ln: userObj.last_name ? [hashData(userObj.last_name)] : undefined,
+          ct: userObj.city ? [hashData(userObj.city)] : undefined,
+          st: userObj.state ? [hashData(userObj.state)] : undefined,
+          zp: userObj.pincode ? [hashData(userObj.pincode)] : undefined,
+          country: userObj.country ? [hashData(userObj.country)] : undefined,
+          fbp: userObj.fbp || undefined,
+          fbc: userObj.fbc || undefined,
           client_ip_address: clientIpAddress,
           client_user_agent: clientUserAgent,
         },
         custom_data: {
           currency: 'INR',
-          value: parseFloat(String(amount))
+          value: parseFloat(Number(amount).toFixed(2))
         }
       }
     ]
@@ -208,6 +220,8 @@ router.post("/verify", auth, (req, res) => {
     razorpay_signature,
     order_id,
     is_buy_now,
+    fbp,
+    fbc,
   } = req.body;
 
   // 1. Signature check
@@ -233,9 +247,11 @@ router.post("/verify", auth, (req, res) => {
       // NEW: Trigger Notification ONLY on successful payment verification
       // ─────────────────────────────────────────────────────────────────
       db.query(
-        `SELECT o.total_amount, u.email, o.coupon_code 
+        `SELECT o.total_amount, u.email, o.coupon_code,
+                a.first_name, a.last_name, a.phone, a.city, a.state, a.pincode, a.country
          FROM orders o 
          JOIN users u ON u.id = o.user_id 
+         LEFT JOIN order_address a ON a.order_id = o.id
          WHERE o.id = ?`,
         [order_id],
         (err, rows) => {
@@ -246,7 +262,20 @@ router.post("/verify", auth, (req, res) => {
               `Order #${order_id} placed by ${rows[0].email} — ₹${rows[0].total_amount}`,
               order_id
             );
-            sendMetaCAPIEvent(order_id, rows[0].email, rows[0].total_amount, req);
+            
+            const userObj = {
+              email: rows[0].email,
+              first_name: rows[0].first_name,
+              last_name: rows[0].last_name,
+              phone: rows[0].phone,
+              city: rows[0].city,
+              state: rows[0].state,
+              pincode: rows[0].pincode,
+              country: rows[0].country,
+              fbp: fbp,
+              fbc: fbc
+            };
+            sendMetaCAPIEvent(order_id, userObj, rows[0].total_amount, req);
 
             // Log coupon usage upon successful payment
             if (rows[0].coupon_code) {

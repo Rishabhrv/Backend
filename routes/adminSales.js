@@ -57,15 +57,16 @@ router.post("/discount/manage-sales", adminAuth, async (req, res) => {
         applicable_on,
         product_ids,
         category_ids,
-        usage_limit_per_user
+        usage_limit_per_user,
+        timer_duration_hours
     } = req.body;
 
     try {
         const promiseDb = db.promise();
         const [result] = await promiseDb.query(
-            `INSERT INTO sales (name, discount_type, discount_value, start_date, end_date, applicable_on, usage_limit_per_user) 
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [name, discount_type, discount_value, start_date, end_date, applicable_on, usage_limit_per_user || null]
+            `INSERT INTO sales (name, discount_type, discount_value, start_date, end_date, applicable_on, usage_limit_per_user, timer_duration_hours) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [name, discount_type, discount_value, start_date, end_date, applicable_on, usage_limit_per_user || null, timer_duration_hours || null]
         );
 
         const saleId = result.insertId;
@@ -124,7 +125,8 @@ router.put("/discount/manage-sales/:id", adminAuth, async (req, res) => {
         applicable_on,
         product_ids,
         category_ids,
-        usage_limit_per_user
+        usage_limit_per_user,
+        timer_duration_hours
     } = req.body;
 
     try {
@@ -132,9 +134,9 @@ router.put("/discount/manage-sales/:id", adminAuth, async (req, res) => {
         
         await promiseDb.query(
             `UPDATE sales 
-             SET name=?, discount_type=?, discount_value=?, start_date=?, end_date=?, applicable_on=?, usage_limit_per_user=?
+             SET name=?, discount_type=?, discount_value=?, start_date=?, end_date=?, applicable_on=?, usage_limit_per_user=?, timer_duration_hours=?
              WHERE id=?`,
-            [name, discount_type, discount_value, start_date, end_date, applicable_on, usage_limit_per_user || null, id]
+            [name, discount_type, discount_value, start_date, end_date, applicable_on, usage_limit_per_user || null, timer_duration_hours || null, id]
         );
 
         await promiseDb.query("DELETE FROM sale_products WHERE sale_id = ?", [id]);
