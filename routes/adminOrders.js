@@ -903,5 +903,6 @@ router.put("/orders/:id/address", adminAuth, (req, res) => {
 });
 
 module.exports = router;
-module.exports.agphEmailTemplate      = agphEmailTemplate;
+module.exports.agphEmailTemplate       = agphEmailTemplate;
 module.exports.agClassicsEmailTemplate = agClassicsEmailTemplate;
+module.exports.buildEmailsForOrder     = buildEmailsForOrder;

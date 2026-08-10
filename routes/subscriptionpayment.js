@@ -331,13 +331,18 @@ router.post("/success", auth, async (req, res) => {
 /* ==================================================
    3️⃣  RAZORPAY WEBHOOK — handles auto-renewals
 ================================================== */
-router.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
+router.post("/webhook", (req, res) => {
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
   const signature = req.headers["x-razorpay-signature"];
 
+  if (!req.rawBody) {
+    console.error("Webhook Error: req.rawBody is missing.");
+    return res.status(400).json({ msg: "Invalid request payload" });
+  }
+
   const expectedSig = crypto
     .createHmac("sha256", webhookSecret)
-    .update(req.body)
+    .update(req.rawBody)
     .digest("hex");
 
   if (expectedSig !== signature) {
@@ -345,7 +350,7 @@ router.post("/webhook", express.raw({ type: "application/json" }), (req, res) =>
     return res.status(400).json({ msg: "Invalid signature" });
   }
 
-  const event = JSON.parse(req.body.toString());
+  const event = req.body;
   const { event: eventName, payload } = event;
 
   if (eventName === "subscription.charged") {
