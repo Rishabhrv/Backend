@@ -5,8 +5,13 @@ const app = express();
 
 app.use(cors());
 app.set('trust proxy', true);
-app.use(express.json());
 
+// Save raw body for Razorpay Webhooks
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 
 const PORT = process.env.PORT || 5000;
 
