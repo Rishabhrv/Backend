@@ -1,9 +1,9 @@
-const express    = require("express");
-const router     = express.Router();
-const Razorpay   = require("razorpay");
-const crypto     = require("crypto");
-const db         = require("../db");
-const jwt        = require("jsonwebtoken");
+const express = require("express");
+const router = express.Router();
+const Razorpay = require("razorpay");
+const crypto = require("crypto");
+const db = require("../db");
+const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 
 // ✅ Reuse the exact same template function from adminorder.js — no duplication
@@ -92,14 +92,14 @@ const auth = (req, res, next) => {
 
 /* ── RAZORPAY ── */
 const razorpay = new Razorpay({
-  key_id:     process.env.RAZORPAY_KEY_ID,
+  key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
 /* ── MAILER (same config as adminorder.js) ── */
 const transporter = nodemailer.createTransport({
-  host:   process.env.MAIL_HOST || "smtp.gmail.com",
-  port:   Number(process.env.MAIL_PORT) || 587,
+  host: process.env.MAIL_HOST || "smtp.gmail.com",
+  port: Number(process.env.MAIL_PORT) || 587,
   secure: Number(process.env.MAIL_PORT) === 465,  // true for 465, false for 587
   auth: {
     user: process.env.MAIL_USER,
@@ -128,9 +128,9 @@ async function sendOrderConfirmedEmail(orderId) {
 
     if (!orderRows?.length) return;
 
-    const row      = orderRows[0];
+    const row = orderRows[0];
     const customer = { name: row.name, email: row.email };
-    const order    = { id: row.id, total_amount: row.total_amount, created_at: row.created_at };
+    const order = { id: row.id, total_amount: row.total_amount, created_at: row.created_at };
 
     // 2️⃣ Get order items including imprint for correct email routing
     const items = await new Promise((resolve, reject) =>
@@ -163,10 +163,10 @@ async function sendOrderConfirmedEmail(orderId) {
     // Send an email for each brand
     for (const email of emails) {
       await transporter.sendMail({
-        from:    `"AGPH Books Store" <${process.env.MAIL_USER}>`,
-        to:      customer.email,
+        from: `"AGPH Books Store" <${process.env.MAIL_USER}>`,
+        to: customer.email,
         subject: email.subject,
-        html:    email.html,
+        html: email.html,
       });
       console.log(`✅ Confirmed email sent → ${customer.email} (order #${orderId}, brand: ${email.brand})`);
     }
@@ -242,9 +242,9 @@ router.post("/create-order", auth, (req, res) => {
 
       razorpay.orders.create(
         {
-          amount:   Math.round(rows[0].total_amount * 100),
+          amount: Math.round(rows[0].total_amount * 100),
           currency: "INR",
-          receipt:  "receipt_" + order_id,
+          receipt: "receipt_" + order_id,
         },
         (err, rpOrder) => {
           if (err) return res.status(500).json(err);
@@ -318,7 +318,7 @@ router.post("/verify", auth, (req, res) => {
               `Order #${order_id} placed by ${rows[0].email} — ₹${rows[0].total_amount}`,
               order_id
             );
-            
+
             const userObj = {
               email: rows[0].email,
               first_name: rows[0].first_name,
@@ -355,24 +355,24 @@ router.post("/verify", auth, (req, res) => {
         (err) => {
           if (err) console.error("Stock deduction error:", err);
 
-        // 4. Insert into shipping table
+          // 4. Insert into shipping table
           db.query(
             `INSERT INTO shipping (order_id, status, confirmed_at)
              VALUES (?, 'confirmed', NOW())
              ON DUPLICATE KEY UPDATE status = 'confirmed', confirmed_at = NOW()`,
             [order_id],
             (err) => {
-              if (err) console.error("Shipping insert error:", err);          
+              if (err) console.error("Shipping insert error:", err);
 
               // 5. Clear cart ONLY IF NOT Buy Now
               const finishOrder = () => {
                 // 6. Send confirmed email — fire and forget, never blocks this response
-                sendOrderConfirmedEmail(order_id);          
+                sendOrderConfirmedEmail(order_id);
 
                 // 7. Respond to frontend with order_id for redirect
                 res.json({ msg: "Payment verified", order_id });
               };
-              
+
               if (!is_buy_now) {
                 db.query("DELETE FROM cart WHERE user_id = ?", [req.user.id], finishOrder);
               } else {
@@ -385,10 +385,19 @@ router.post("/verify", auth, (req, res) => {
     }
   );
 });
+
+
 /* ══════════════════════════════════════════════════════════
    RAZORPAY WEBHOOK (FOR LATE AUTHORIZATIONS)
 ══════════════════════════════════════════════════════════ */
 router.post("/webhook", (req, res) => {
+  console.log("=================================");
+  console.log("RAZORPAY WEBHOOK RECEIVED");
+  console.log("Time:", new Date().toISOString());
+  console.log("Event:", req.body?.event);
+  console.log("Raw body exists:", !!req.rawBody);
+  console.log("Signature exists:", !!req.headers["x-razorpay-signature"]);
+  console.log("=================================");
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
   const signature = req.headers["x-razorpay-signature"];
 
@@ -458,7 +467,7 @@ router.post("/webhook", (req, res) => {
                     `Order #${order_id} placed by ${userRows[0].email} — ₹${userRows[0].total_amount}`,
                     order_id
                   );
-                  
+
                   const userObj = {
                     email: userRows[0].email,
                     first_name: userRows[0].first_name,
@@ -468,10 +477,10 @@ router.post("/webhook", (req, res) => {
                     state: userRows[0].state,
                     pincode: userRows[0].pincode,
                     country: userRows[0].country,
-                    fbp: undefined, 
+                    fbp: undefined,
                     fbc: undefined
                   };
-                  
+
                   sendMetaCAPIEvent(order_id, userObj, userRows[0].total_amount, req);
 
                   if (userRows[0].coupon_code) {
@@ -502,20 +511,20 @@ router.post("/webhook", (req, res) => {
                    ON DUPLICATE KEY UPDATE status = 'confirmed', confirmed_at = NOW()`,
                   [order_id],
                   (err) => {
-                    if (err) console.error("Shipping insert error:", err);          
+                    if (err) console.error("Shipping insert error:", err);
 
                     // Clear the cart for this user since they completed an order.
                     db.query("DELETE FROM cart WHERE user_id = ?", [order.user_id]);
 
                     // Send confirmed email
-                    sendOrderConfirmedEmail(order_id);          
+                    sendOrderConfirmedEmail(order_id);
                   }
                 );
               }
             );
           }
         );
-        
+
         return res.json({ ok: true, msg: "Order updated via webhook" });
       }
     );
