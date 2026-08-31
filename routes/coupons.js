@@ -29,13 +29,19 @@ router.get("/available", auth, async (req, res) => {
   try {
     // 1️⃣ Fetch all active, non-expired coupons (exclude subscription coupons)
     const [coupons] = await db.promise().query(
-      `SELECT *
-       FROM coupons
-       WHERE status = 'active'
-         AND start_date <= CURDATE()
-         AND expiry_date >= CURDATE()
-         AND applicable_on != 'subscription'
-       ORDER BY created_at DESC`
+      `SELECT c.*
+       FROM coupons c
+       WHERE c.status = 'active'
+         AND c.is_hidden = 0
+         AND c.start_date <= CURDATE()
+         AND c.expiry_date >= CURDATE()
+         AND c.applicable_on != 'subscription'
+         AND (
+           NOT EXISTS (SELECT 1 FROM coupon_users cu WHERE cu.coupon_id = c.id)
+           OR EXISTS (SELECT 1 FROM coupon_users cu WHERE cu.coupon_id = c.id AND cu.user_id = ?)
+         )
+       ORDER BY c.created_at DESC`,
+       [userId]
     );
 
     if (!coupons.length) return res.json([]);

@@ -59,6 +59,7 @@ router.get("/", async (req, res) => {
         p.main_image,
         p.stock,
         p.product_type,
+        p.is_free_shipping,
         p.created_at,
 
         -- Ebook-specific pricing (lowest across pdf/epub variants)

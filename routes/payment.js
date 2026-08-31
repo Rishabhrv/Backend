@@ -461,12 +461,6 @@ router.post("/webhook", (req, res) => {
               [order_id],
               (err, userRows) => {
                 if (!err && userRows.length > 0) {
-                  createAdminNotification(
-                    "order",
-                    "New Order Received (Webhook)",
-                    `Order #${order_id} placed by ${userRows[0].email} — ₹${userRows[0].total_amount}`,
-                    order_id
-                  );
 
                   const userObj = {
                     email: userRows[0].email,

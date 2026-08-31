@@ -354,10 +354,10 @@ router.post("/shipping-cost", (req, res) => {
     const paperbackItems = items.filter(i => i.format === 'paperback');
     if (!paperbackItems.length) return calculateCost(0);
 
-    const slugs = paperbackItems.map(i => i.slug).filter(Boolean);
+    const productIds = paperbackItems.map(i => i.product_id).filter(Boolean);
 
-    // If no slugs are present, force calculation with fallback weight
-    if (!slugs.length) {
+    // If no productIds are present, force calculation with fallback weight
+    if (!productIds.length) {
       let fallbackWeight = 0;
       paperbackItems.forEach(i => fallbackWeight += 0.5 * Number(i.quantity || 1));
       return calculateCost(fallbackWeight);
@@ -365,27 +365,31 @@ router.post("/shipping-cost", (req, res) => {
 
     // Notice: Removed strict category JOINs to prevent the query from failing silently
     const cartSql = `
-      SELECT p.slug, sd.weight
+      SELECT p.id as product_id, p.is_free_shipping, sd.weight
       FROM products p
       LEFT JOIN shipping_details sd ON sd.product_id = p.id
-      WHERE p.slug IN (?)
+      WHERE p.id IN (?)
     `;
 
-    db.query(cartSql, [slugs], (err, rows) => {
+    db.query(cartSql, [productIds], (err, rows) => {
       let totalWeight = 0;
 
       // Loop over frontend items directly so no item is left behind
       paperbackItems.forEach(cartItem => {
         let itemWeight = 0.5; // Default fallback to 0.5 kg
+        let isFree = false;
 
         if (!err && rows && rows.length > 0) {
-          const dbMatch = rows.find(r => r.slug === cartItem.slug);
-          if (dbMatch && dbMatch.weight) {
-            itemWeight = Number(dbMatch.weight);
+          const dbMatch = rows.find(r => r.product_id === cartItem.product_id);
+          if (dbMatch) {
+            if (dbMatch.is_free_shipping) isFree = true;
+            if (dbMatch.weight) itemWeight = Number(dbMatch.weight);
           }
         }
 
-        totalWeight += itemWeight * Number(cartItem.quantity || 1);
+        if (!isFree) {
+          totalWeight += itemWeight * Number(cartItem.quantity || 1);
+        }
       });
 
       calculateCost(totalWeight);
@@ -398,8 +402,9 @@ router.post("/shipping-cost", (req, res) => {
 
       // Removed strict category JOINs here as well
       const cartSql = `
-        SELECT c.quantity, sd.weight
+        SELECT c.quantity, p.is_free_shipping, sd.weight
         FROM cart c
+        JOIN products p ON p.id = c.product_id
         LEFT JOIN shipping_details sd ON sd.product_id = c.product_id
         WHERE c.user_id = ?
         AND c.format = 'paperback'
@@ -410,8 +415,10 @@ router.post("/shipping-cost", (req, res) => {
 
         let totalWeight = 0;
         dbItems.forEach(i => {
-          const itemWeight = Number(i.weight) || 0.5; // Fallback to 0.5 kg
-          totalWeight += itemWeight * Number(i.quantity);
+          if (!i.is_free_shipping) {
+            const itemWeight = Number(i.weight) || 0.5; // Fallback to 0.5 kg
+            totalWeight += itemWeight * Number(i.quantity);
+          }
         });
 
         calculateCost(totalWeight);
@@ -498,6 +505,26 @@ router.post("/apply-coupon", auth, (req, res) => {
                   msg: "You have already used this coupon",
                 });
               }
+
+              /* 3.5️⃣ USER RESTRICTION CHECK */
+              db.query(
+                `SELECT user_id FROM coupon_users WHERE coupon_id = ?`,
+                [coupon.id],
+                (err, userRows) => {
+                  if (err) {
+                    console.error("Coupon user restriction error:", err);
+                    return res.status(500).json({ msg: "Database error" });
+                  }
+
+                  if (userRows.length > 0) {
+                    const allowedUsers = userRows.map(r => r.user_id);
+                    if (!allowedUsers.includes(userId)) {
+                      return res.status(400).json({
+                        reason: "user_restricted",
+                        msg: "This coupon is not valid for your account",
+                      });
+                    }
+                  }
 
               /* 4️⃣ LOAD CART OR BUY NOW ITEM */
               const processItems = async (err, items) => {
@@ -683,6 +710,8 @@ router.post("/apply-coupon", auth, (req, res) => {
                   processItems
                 );
               }
+                }
+              );
             }
           );
         }
