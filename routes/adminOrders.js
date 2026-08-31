@@ -1,20 +1,20 @@
-const express    = require("express");
-const jwt        = require("jsonwebtoken");
+const express = require("express");
+const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
-const router     = express.Router();
-const db         = require("../db");
+const router = express.Router();
+const db = require("../db");
 
 const SECRET = "MY_SECRET_KEY";
 
 // ─── Transporter Setup (AGPH - Default) ───────────────────────────────────────
 const agphTransporter = nodemailer.createTransport({
-  host:           process.env.MAIL_HOST || "smtp.gmail.com",
-  port:           Number(process.env.MAIL_PORT) || 587,
-  secure:         Number(process.env.MAIL_PORT) === 465,
-  pool:           true,   // ← reuse one authenticated connection
+  host: process.env.MAIL_HOST || "smtp.gmail.com",
+  port: Number(process.env.MAIL_PORT) || 587,
+  secure: Number(process.env.MAIL_PORT) === 465,
+  pool: true,   // ← reuse one authenticated connection
   maxConnections: 1,      // ← Gmail only allows 1 concurrent SMTP connection
-  rateDelta:      2000,   // ← enforce at least 2s between messages
-  rateLimit:      3,      // ← max 3 messages per rateDelta window
+  rateDelta: 2000,   // ← enforce at least 2s between messages
+  rateLimit: 3,      // ← max 3 messages per rateDelta window
   auth: {
     user: process.env.MAIL_USER,
     pass: process.env.MAIL_PASS,
@@ -23,13 +23,13 @@ const agphTransporter = nodemailer.createTransport({
 
 // ─── Transporter Setup (AG Classics) ──────────────────────────────────────────
 const agclassicsTransporter = nodemailer.createTransport({
-  host:           process.env.MAIL_HOST || "smtp.gmail.com",
-  port:           Number(process.env.MAIL_PORT) || 587,
-  secure:         Number(process.env.MAIL_PORT) === 465,
-  pool:           true,
+  host: process.env.MAIL_HOST || "smtp.gmail.com",
+  port: Number(process.env.MAIL_PORT) || 587,
+  secure: Number(process.env.MAIL_PORT) === 465,
+  pool: true,
   maxConnections: 1,
-  rateDelta:      2000,
-  rateLimit:      3,
+  rateDelta: 2000,
+  rateLimit: 3,
   auth: {
     user: process.env.MAIL_AGUSER,
     pass: process.env.MAIL_AGPASS,
@@ -40,13 +40,13 @@ const agclassicsTransporter = nodemailer.createTransport({
    UNIFIED STATUS MAP
 ════════════════════════════════════════════════════════ */
 const UNIFIED_MAP = {
-  pending:          { orderStatus: "pending",   shippingStatus: null },
-  paid:             { orderStatus: "paid",      shippingStatus: null },
-  confirmed:        { orderStatus: "paid",      shippingStatus: "confirmed" },
-  shipped:          { orderStatus: "shipped",   shippingStatus: "shipped" },
-  out_for_delivery: { orderStatus: "shipped",   shippingStatus: "out_for_delivery" },
-  delivered:        { orderStatus: "completed", shippingStatus: "delivered" },
-  cancelled:        { orderStatus: "cancelled", shippingStatus: null },
+  pending: { orderStatus: "pending", shippingStatus: null },
+  paid: { orderStatus: "paid", shippingStatus: null },
+  confirmed: { orderStatus: "paid", shippingStatus: "confirmed" },
+  shipped: { orderStatus: "shipped", shippingStatus: "shipped" },
+  out_for_delivery: { orderStatus: "shipped", shippingStatus: "out_for_delivery" },
+  delivered: { orderStatus: "completed", shippingStatus: "delivered" },
+  cancelled: { orderStatus: "cancelled", shippingStatus: null },
 };
 
 
@@ -61,48 +61,47 @@ function agphEmailTemplate(unifiedStatus, customer, order, tracking, courier, it
 
   const statusConfig = {
     confirmed: {
-      subject:  `Order #${order.id} Confirmed — AGPH Books`,
+      subject: `Order #${order.id} Confirmed — AGPH Books`,
       headline: "Order Confirmed",
-      emoji:    "✅",
-      body:     items.length > 0 && items.every(i => i.format === "ebook")
+      emoji: "✅",
+      body: items.length > 0 && items.every(i => i.format === "ebook")
         ? `Your digital library is ready! Your eBook purchase is confirmed and available for immediate reading in your account.`
         : `Your order has been received and is being prepared for shipment. We'll notify you the moment it leaves our warehouse.`,
-      accent:   ACCENT,
-      badge:    "CONFIRMED",
+      accent: ACCENT,
+      badge: "CONFIRMED",
     },
     shipped: {
-      subject:  `Your order #${order.id} is on the way!`,
+      subject: `Your order #${order.id} is on the way!`,
       headline: "Order Dispatched",
-      emoji:    "📦",
-      body:     `Great news! Your package has been handed over to <strong>${courier || "our courier partner"}</strong>.${
-                  tracking ? ` You can track your journey with ID: <strong>${tracking}</strong>.` : ""
-                }`,
-      accent:   "#7c3aed",
-      badge:    "SHIPPED",
+      emoji: "📦",
+      body: `Great news! Your package has been handed over to <strong>${courier || "our courier partner"}</strong>.${tracking ? ` You can track your journey with ID: <strong>${tracking}</strong>.` : ""
+        }`,
+      accent: "#7c3aed",
+      badge: "SHIPPED",
     },
     out_for_delivery: {
-      subject:  `Out for delivery: Order #${order.id}`,
+      subject: `Out for delivery: Order #${order.id}`,
       headline: "Arriving Today",
-      emoji:    "🚚",
-      body:     `Your package is with the delivery agent and will reach your doorstep today.`,
-      accent:   "#ca8a04",
-      badge:    "OUT FOR DELIVERY",
+      emoji: "🚚",
+      body: `Your package is with the delivery agent and will reach your doorstep today.`,
+      accent: "#ca8a04",
+      badge: "OUT FOR DELIVERY",
     },
     delivered: {
-      subject:  `Delivered: Order #${order.id}`,
+      subject: `Delivered: Order #${order.id}`,
       headline: "Package Delivered",
-      emoji:    "✨",
-      body:     `Your order has been successfully delivered. We hope you enjoy your new books!`,
-      accent:   "#16a34a",
-      badge:    "DELIVERED",
+      emoji: "✨",
+      body: `Your order has been successfully delivered. We hope you enjoy your new books!`,
+      accent: "#16a34a",
+      badge: "DELIVERED",
     },
     cancelled: {
-      subject:  `Update on Order #${order.id}`,
+      subject: `Update on Order #${order.id}`,
       headline: "Order Cancelled",
-      emoji:    "✉️",
-      body:     `Your order <strong>#${order.id}</strong> has been cancelled. If you didn't request this, please contact our support immediately.`,
-      accent:   "#e11d48",
-      badge:    "CANCELLED",
+      emoji: "✉️",
+      body: `Your order <strong>#${order.id}</strong> has been cancelled. If you didn't request this, please contact our support immediately.`,
+      accent: "#e11d48",
+      badge: "CANCELLED",
     },
   };
 
@@ -112,10 +111,10 @@ function agphEmailTemplate(unifiedStatus, customer, order, tracking, courier, it
   /* ── Item Rows ── */
   const itemRowsHTML = items.map((item) => {
     const isEbook = item.format === "ebook";
-    const badgeStyle = isEbook 
-      ? `background:#eff6ff; color:#2563eb;` 
+    const badgeStyle = isEbook
+      ? `background:#eff6ff; color:#2563eb;`
       : `background:#f1f5f9; color:#475569;`;
-    
+
     return `
       <tr>
         <td style="padding:16px; border-bottom:1px solid #f1f5f9;">
@@ -200,50 +199,48 @@ function agphEmailTemplate(unifiedStatus, customer, order, tracking, courier, it
 ════════════════════════════════════════════════════════ */
 function agClassicsEmailTemplate(unifiedStatus, customer, order, tracking, courier, items = []) {
   // Gold accent
-  const GOLD   = "#c9a84c";
-  const DARK   = "#000000";
-  const DARK2  = "#ffffff";
-  const MUTED  = "#262626";
-  const LIGHT  = "#3b3b3b";
+  const GOLD = "#c9a84c";
+  const DARK = "#000000";
+  const DARK2 = "#ffffff";
+  const MUTED = "#262626";
+  const LIGHT = "#3b3b3b";
   const DIMMED = "rgba(232, 178, 29, 0.79)";
 
   const statusConfig = {
     confirmed: {
-      subject:  `Order #${order.id} Confirmed — Thank you, ${customer.name}`,
+      subject: `Order #${order.id} Confirmed — Thank you, ${customer.name}`,
       headline: "Order Confirmed",
-      badge:    "CONFIRMED",
-      body:     items.length > 0 && items.every(i => i.format === "ebook")
+      badge: "CONFIRMED",
+      body: items.length > 0 && items.every(i => i.format === "ebook")
         ? `Your eBook order is confirmed. Your titles are now available instantly in <strong style="color:${GOLD};">My Books</strong> within your account. Thank you for choosing AG Classics.`
         : `We have received your order and it is now being prepared. You will receive another update once it has been dispatched.`,
     },
     shipped: {
-      subject:  `Your AG Classics Order #${order.id} Has Been Shipped`,
+      subject: `Your AG Classics Order #${order.id} Has Been Shipped`,
       headline: "Your Order Is On Its Way",
-      badge:    "SHIPPED",
-      body:     `Your order has been entrusted to <strong style="color:${LIGHT};">${courier || "our courier partner"}</strong>.${
-                  tracking ? ` You may track your parcel using tracking ID <strong style="color:${GOLD};">${tracking}</strong>.` : ""
-                }`,
+      badge: "SHIPPED",
+      body: `Your order has been entrusted to <strong style="color:${LIGHT};">${courier || "our courier partner"}</strong>.${tracking ? ` You may track your parcel using tracking ID <strong style="color:${GOLD};">${tracking}</strong>.` : ""
+        }`,
     },
     out_for_delivery: {
-      subject:  `Your AG Classics Order #${order.id} Is Out for Delivery`,
+      subject: `Your AG Classics Order #${order.id} Is Out for Delivery`,
       headline: "Out for Delivery",
-      badge:    "OUT FOR DELIVERY",
-      body:     `Your parcel is almost with you. It is out for delivery today — please ensure someone is available to receive it.`,
+      badge: "OUT FOR DELIVERY",
+      body: `Your parcel is almost with you. It is out for delivery today — please ensure someone is available to receive it.`,
     },
     delivered: {
-      subject:  `Your AG Classics Order #${order.id} Has Been Delivered`,
+      subject: `Your AG Classics Order #${order.id} Has Been Delivered`,
       headline: "Delivered",
-      badge:    "DELIVERED",
-      body:     `Your order has been delivered successfully. We hope these titles bring you great joy. Should you have any concerns, do not hesitate to reach out.`,
+      badge: "DELIVERED",
+      body: `Your order has been delivered successfully. We hope these titles bring you great joy. Should you have any concerns, do not hesitate to reach out.`,
     },
     cancelled: {
-      subject:  `Your AG Classics Order #${order.id} Has Been Cancelled`,
+      subject: `Your AG Classics Order #${order.id} Has Been Cancelled`,
       headline: "Order Cancelled",
-      badge:    "CANCELLED",
-      body:     `We regret to inform you that your order <strong style="color:${LIGHT};">#${order.id}</strong> has been cancelled. If you believe this is in error, please contact us.${
-                  order.total_amount > 0
-                    ? ` Any payment made will be refunded within <strong style="color:${LIGHT};">5–7 business days</strong>.`
-                    : ""}`,
+      badge: "CANCELLED",
+      body: `We regret to inform you that your order <strong style="color:${LIGHT};">#${order.id}</strong> has been cancelled. If you believe this is in error, please contact us.${order.total_amount > 0
+          ? ` Any payment made will be refunded within <strong style="color:${LIGHT};">5–7 business days</strong>.`
+          : ""}`,
     },
   };
 
@@ -282,18 +279,18 @@ function agClassicsEmailTemplate(unifiedStatus, customer, order, tracking, couri
     </table>` : "";
 
   /* ── Order summary ── */
-  const orderDate    = order.created_at
+  const orderDate = order.created_at
     ? new Date(order.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" })
     : "";
-  const subtotal     = items.reduce((sum, i) => sum + Number(i.price) * Number(i.quantity), 0);
+  const subtotal = items.reduce((sum, i) => sum + Number(i.price) * Number(i.quantity), 0);
   const shippingCost = Number(order.shipping_cost || 0);
 
   const summaryRowsArr = [
     orderDate && [`Order Date`, orderDate],
-    courier   && [`Courier`,    courier],
-    tracking  && [`Tracking ID`, tracking],
-    [`Subtotal`,  `₹${subtotal.toFixed(2)}`],
-    [`Shipping`,  shippingCost > 0 ? `₹${shippingCost.toFixed(2)}` : "Free"],
+    courier && [`Courier`, courier],
+    tracking && [`Tracking ID`, tracking],
+    [`Subtotal`, `₹${subtotal.toFixed(2)}`],
+    [`Shipping`, shippingCost > 0 ? `₹${shippingCost.toFixed(2)}` : "Free"],
   ].filter(Boolean);
 
   const summaryRowsHTML = summaryRowsArr.map(([label, val]) => `
@@ -449,8 +446,8 @@ function agClassicsEmailTemplate(unifiedStatus, customer, order, tracking, couri
      • Mixed                 → send both emails
 ════════════════════════════════════════════════════════ */
 function buildEmailsForOrder(unifiedStatus, customer, order, tracking, courier, items) {
-  const agphItems      = items.filter(i => i.imprint !== "agclassics");
-  const classicsItems  = items.filter(i => i.imprint === "agclassics");
+  const agphItems = items.filter(i => i.imprint !== "agclassics");
+  const classicsItems = items.filter(i => i.imprint === "agclassics");
 
   const emails = [];
 
@@ -536,19 +533,19 @@ router.get("/orders/:id", adminAuth, (req, res) => {
 
         // 1. Get the billing address row
         const billingAddress = addrRows[0] || {};
-        
+
         // 2. Fetch phone from order_address, fallback to user profile phone
         const orderPhone = billingAddress.phone || order.phone;
 
         db.query(
-          `SELECT p.title, p.main_image, oi.quantity, oi.price, oi.format,
+          `SELECT p.title, p.slug, p.book_id, p.main_image, oi.quantity, oi.price, oi.format,
                   GROUP_CONCAT(DISTINCT c.imprint ORDER BY c.imprint) AS imprint
            FROM order_items oi
            JOIN products p ON p.id = oi.product_id
            LEFT JOIN product_categories pc ON pc.product_id = p.id
            LEFT JOIN categories c ON c.id = pc.category_id
            WHERE oi.order_id = ?
-           GROUP BY oi.id, p.title, p.main_image, oi.quantity, oi.price, oi.format`,
+           GROUP BY oi.id, p.title, p.slug, p.book_id, p.main_image, oi.quantity, oi.price, oi.format`,
           [orderId],
           (err, items) => {
             if (err) return res.status(500).json({ msg: "DB error" });
@@ -559,7 +556,7 @@ router.get("/orders/:id", adminAuth, (req, res) => {
               imprint: (i.imprint || "").includes("agclassics") ? "agclassics" : "agph",
             }));
 
-           // FETCH SHIPPING
+            // FETCH SHIPPING
             db.query(`SELECT * FROM shipping WHERE order_id = ? LIMIT 1`, [orderId], (err, shipRows) => {
               if (err) return res.status(500).json({ msg: "DB error" });
 
@@ -582,13 +579,13 @@ router.get("/orders/:id", adminAuth, (req, res) => {
                       coupon_code: order.coupon_code,
                       coupon_discount: order.coupon_discount,
                     },
-                    customer: { name: order.name, email: order.email, phone: orderPhone }, 
-                    billing:  billingAddress,
+                    customer: { name: order.name, email: order.email, phone: orderPhone },
+                    billing: billingAddress,
                     shipping: shipRows[0] || {},
                     items: normItems,
                     logs: logs || [] // 🌟 Pass logs back to frontend
                   });
-              });
+                });
             });
           }
         );
@@ -613,19 +610,38 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
 
   const { orderStatus, shippingStatus } = mapping;
 
-  // 2. Update orders.status
-  db.query(`UPDATE orders SET status = ? WHERE id = ?`, [orderStatus, orderId], async (err) => {
-    if (err) return res.status(500).json({ msg: "Failed to update order status" });
+  db.query(`SELECT status, payment_status FROM orders WHERE id = ?`, [orderId], (err, orderRows) => {
+    if (err || orderRows.length === 0) return res.status(500).json({ msg: "Order not found" });
 
-    // 3. Upsert shipping row
+    const oldStatus = orderRows[0].status;
+    const paymentStatus = orderRows[0].payment_status;
+
+    // 2. Update orders.status
+    db.query(`UPDATE orders SET status = ? WHERE id = ?`, [orderStatus, orderId], async (err) => {
+      if (err) return res.status(500).json({ msg: "Failed to update order status" });
+
+      if (unifiedStatus === 'cancelled' && oldStatus !== 'cancelled' && paymentStatus === 'success') {
+        db.query(
+          `UPDATE products p
+           JOIN order_items oi ON oi.product_id = p.id
+           SET p.stock = p.stock + oi.quantity
+           WHERE oi.order_id = ? AND oi.format = 'paperback'`,
+          [orderId],
+          (err) => {
+            if (err) console.error("Restock error:", err);
+          }
+        );
+      }
+
+      // 3. Upsert shipping row
     const doShipping = (next) => {
       if (!shippingStatus) return next();
 
       const columnMap = {
-        confirmed:        "confirmed_at",
-        shipped:          "shipped_at",
+        confirmed: "confirmed_at",
+        shipped: "shipped_at",
         out_for_delivery: "out_for_delivery_at",
-        delivered:        "delivered_at",
+        delivered: "delivered_at",
       };
       const timeCol = columnMap[shippingStatus];
 
@@ -666,12 +682,12 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
             return res.json({ msg: "Status updated (email skipped)" });
           }
 
-          const row      = orderRows[0];
+          const row = orderRows[0];
           const customer = { name: row.name, email: row.email };
-          const order    = {
-            id:            row.id,
-            total_amount:  row.total_amount,
-            created_at:    row.created_at,
+          const order = {
+            id: row.id,
+            total_amount: row.total_amount,
+            created_at: row.created_at,
             shipping_cost: row.shipping_cost,
           };
 
@@ -857,6 +873,7 @@ router.put("/orders/:id/unified-status", adminAuth, async (req, res) => {
       );
     });
   });
+  });
 });
 
 /* ════════════════════════════════════════
@@ -903,6 +920,6 @@ router.put("/orders/:id/address", adminAuth, (req, res) => {
 });
 
 module.exports = router;
-module.exports.agphEmailTemplate       = agphEmailTemplate;
+module.exports.agphEmailTemplate = agphEmailTemplate;
 module.exports.agClassicsEmailTemplate = agClassicsEmailTemplate;
-module.exports.buildEmailsForOrder     = buildEmailsForOrder;
+module.exports.buildEmailsForOrder = buildEmailsForOrder;

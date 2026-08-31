@@ -126,8 +126,9 @@ router.post("/shipping-cost", auth, (req, res) => {
 
   /* 1️⃣ Paperback cart items with their weights */
   const cartSql = `
-    SELECT c.quantity, sd.weight
+    SELECT c.quantity, p.is_free_shipping, sd.weight
     FROM cart c
+    JOIN products p ON p.id = c.product_id
     JOIN shipping_details sd ON sd.product_id = c.product_id
     JOIN product_categories pc ON pc.product_id = c.product_id
     JOIN categories cat ON cat.id = pc.category_id
@@ -141,7 +142,11 @@ router.post("/shipping-cost", auth, (req, res) => {
 
     /* 2️⃣ Total weight */
     let totalWeight = 0;
-    items.forEach(i => { totalWeight += Number(i.weight) * Number(i.quantity); });
+    items.forEach(i => {
+      if (!i.is_free_shipping) {
+        totalWeight += Number(i.weight) * Number(i.quantity);
+      }
+    });
 
     /* 3️⃣ Find zone for this state */
     db.query(
@@ -341,6 +346,17 @@ async function validateCoupon(code, userId, cartItems) {
   );
   if (coupon.usage_per_user !== null && used >= coupon.usage_per_user)
     return { valid: false, message: "You have already used this coupon" };
+
+  const userRows = await new Promise((resolve, reject) =>
+    db.query("SELECT user_id FROM coupon_users WHERE coupon_id = ?",
+      [coupon.id], (err, rows) => (err ? reject(err) : resolve(rows)))
+  );
+  if (userRows.length > 0) {
+    const allowedUsers = userRows.map(r => r.user_id);
+    if (!allowedUsers.includes(userId)) {
+      return { valid: false, message: "This coupon is not valid for your account" };
+    }
+  }
 
   let allowedProductIds = [], allowedCategoryIds = [];
   if (coupon.applicable_on === "product") {

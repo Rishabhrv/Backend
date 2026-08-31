@@ -300,7 +300,7 @@ router.post(
     const fmap = filesByField(req.files);
     let {
       title, description, price, sell_price, stock, sku, product_type,
-      status, weight, length, width, height, ebook_price, ebook_sell_price, book_id
+      status, weight, length, width, height, ebook_price, ebook_sell_price, book_id, is_free_shipping
     } = req.body;
 
     price = price || null;
@@ -340,16 +340,18 @@ router.post(
       if (dateAttr?.values?.trim()) publication_date = parseDate(dateAttr.values);
     }
 
+    const isFreeShipping = is_free_shipping === "true" || is_free_shipping === true || is_free_shipping === 1 ? 1 : 0;
+
     const executeInsert = () => {
       const productSql = `
         INSERT INTO products
-        (title, slug, description, price, sell_price, stock, sku, product_type, status, main_image, book_id, isbn, no_of_pages, publication_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (title, slug, description, price, sell_price, stock, sku, product_type, status, main_image, book_id, isbn, no_of_pages, publication_date, is_free_shipping)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       db.query(
         productSql,
-        [title, slug, description, price, sell_price, stock, sku, product_type, status, imagePath, book_id || null, isbn, no_of_pages, publication_date],
+        [title, slug, description, price, sell_price, stock, sku, product_type, status, imagePath, book_id || null, isbn, no_of_pages, publication_date, isFreeShipping],
         (err, result) => {
           if (err) return res.status(500).json({ message: err.message });
 
@@ -507,7 +509,7 @@ router.post(
 router.get("/", (req, res) => {
   const sql = `
 SELECT 
-  p.id, p.title AS name, p.main_image AS image, p.sku, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.created_at AS date, p.updated_at,
+  p.id, p.title AS name, p.main_image AS image, p.sku, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.is_free_shipping, p.created_at AS date, p.updated_at,
   GROUP_CONCAT(DISTINCT c.name) AS categories,
   GROUP_CONCAT(DISTINCT c.imprint) AS imprints,
   MAX(sm.meta_title) AS meta_title,
@@ -518,7 +520,7 @@ LEFT JOIN product_categories pc ON pc.product_id = p.id
 LEFT JOIN categories c ON c.id = pc.category_id
 LEFT JOIN seo_meta sm ON sm.page_type = 'product' AND sm.page_id = p.id
 WHERE p.status = 'published'
-GROUP BY p.id, p.title, p.main_image, p.sku, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.created_at, p.updated_at
+GROUP BY p.id, p.title, p.main_image, p.sku, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.is_free_shipping, p.created_at, p.updated_at
 ORDER BY p.created_at DESC
   `;
   db.query(sql, (err, results) => {
@@ -537,7 +539,7 @@ ORDER BY p.created_at DESC
 router.get("/table-product", (req, res) => {
   const sql = `
 SELECT 
-  p.id, p.title AS name, p.main_image AS image, p.sku,p.isbn, p.book_id, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.created_at AS date, p.updated_at,
+  p.id, p.title AS name, p.main_image AS image, p.sku,p.isbn, p.book_id, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.is_free_shipping, p.created_at AS date, p.updated_at,
   GROUP_CONCAT(DISTINCT c.name) AS categories,
   GROUP_CONCAT(DISTINCT c.imprint) AS imprints,
   MAX(sm.meta_title) AS meta_title,
@@ -547,7 +549,7 @@ FROM products p
 LEFT JOIN product_categories pc ON pc.product_id = p.id
 LEFT JOIN categories c ON c.id = pc.category_id
 LEFT JOIN seo_meta sm ON sm.page_type = 'product' AND sm.page_id = p.id
-GROUP BY p.id, p.title, p.main_image, p.sku, p.book_id,p.isbn, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.created_at, p.updated_at
+GROUP BY p.id, p.title, p.main_image, p.sku, p.book_id,p.isbn, p.stock, p.slug, p.description, p.price, p.sell_price, p.status, p.product_type, p.is_free_shipping, p.created_at, p.updated_at
 ORDER BY p.created_at DESC
   `;
   db.query(sql, (err, results) => {
@@ -603,7 +605,7 @@ router.get("/slug/:slug", (req, res) => {
   const sql = `
     SELECT 
       p.id, p.title, p.slug, p.description, p.price, p.sell_price, p.stock, 
-      p.product_type, p.main_image, p.updated_at,
+      p.product_type, p.main_image, p.is_free_shipping, p.updated_at,
       MAX(sd.weight) AS weight, MAX(sd.length) AS length, 
       MAX(sd.width) AS width, MAX(sd.height) AS height,
       MAX(e.file_path) AS ebook_path,
@@ -742,7 +744,7 @@ router.get("/:id", (req, res) => {
   const { id } = req.params;
   const sql = `
     SELECT 
-      p.id, p.book_id, p.title, p.slug, p.description, p.price, p.sell_price, p.stock, p.sku, p.status, p.product_type, p.main_image, p.updated_at,
+      p.id, p.book_id, p.title, p.slug, p.description, p.price, p.sell_price, p.stock, p.sku, p.status, p.product_type, p.is_free_shipping, p.main_image, p.updated_at,
       MAX(sd.weight) AS weight, MAX(sd.length) AS length, MAX(sd.width) AS width, MAX(sd.height) AS height,
       MAX(sm.meta_title) AS meta_title, MAX(sm.meta_description) AS meta_description, MAX(sm.keywords) AS keywords,
       MAX(e.file_path) AS ebook_path, MAX(e.file_type) AS ebook_type, MAX(e.price) AS ebook_price, MAX(e.sell_price) AS ebook_sell_price,
@@ -803,7 +805,7 @@ router.put(
     let {
       title, slug, description, price, sell_price, stock, sku, product_type, status,
       weight, length, width, height, meta_title, meta_description, keywords,
-      categories, attributes, authors, ebook_price, ebook_sell_price, book_id,
+      categories, attributes, authors, ebook_price, ebook_sell_price, book_id, is_free_shipping
     } = req.body;
 
     price = price || null;
@@ -839,18 +841,20 @@ router.put(
       if (dateAttr?.values?.trim()) publication_date = parseDate(dateAttr.values);
     }
 
+    const isFreeShipping = is_free_shipping === "true" || is_free_shipping === true || is_free_shipping === 1 ? 1 : 0;
+
     const executeUpdate = () => {
       const updateSql = `
         UPDATE products SET
           title = ?, slug = ?, description = ?, price = ?, sell_price = ?, stock = ?, sku = ?, product_type = ?, status = ?, book_id = ?, updated_at = NOW(),
-          isbn = ?, no_of_pages = ?, publication_date = ?
+          isbn = ?, no_of_pages = ?, publication_date = ?, is_free_shipping = ?
           ${imagePath ? ", main_image = ?" : ""}
         WHERE id = ?
       `;
 
       const params = imagePath
-        ? [title, slug, description, price, sell_price, stock, sku, product_type, status, book_id || null, isbn, no_of_pages, publication_date, imagePath, id]
-        : [title, slug, description, price, sell_price, stock, sku, product_type, status, book_id || null, isbn, no_of_pages, publication_date, id];
+        ? [title, slug, description, price, sell_price, stock, sku, product_type, status, book_id || null, isbn, no_of_pages, publication_date, isFreeShipping, imagePath, id]
+        : [title, slug, description, price, sell_price, stock, sku, product_type, status, book_id || null, isbn, no_of_pages, publication_date, isFreeShipping, id];
 
       db.query(`SELECT stock FROM products WHERE id = ?`, [id], (err, stockRows) => {
         const wasOutOfStock = !err && stockRows.length && Number(stockRows[0].stock) === 0;

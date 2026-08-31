@@ -42,19 +42,21 @@ router.post("/coupons", adminAuth, (req, res) => {
     applicable_on,              // ✅ NEW
     selected_products = [],     // ✅ NEW
     selected_categories = [],   // ✅ NEW
+    selected_users = [],        // ✅ NEW
     start_date,
     expiry_date,
     usage_limit,
     usage_per_user,
     status,
+    is_hidden,
   } = req.body;
 
   const sql = `
     INSERT INTO coupons
     (code, discount_type, discount_value, min_cart_value, max_discount,
      applicable_on, product_type, start_date, expiry_date,
-     usage_limit, usage_per_user, status)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+     usage_limit, usage_per_user, status, is_hidden)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
   `;
 
   db.query(
@@ -72,6 +74,7 @@ router.post("/coupons", adminAuth, (req, res) => {
       usage_limit || null,
       usage_per_user || 1,
       status || "active",
+      is_hidden ? 1 : 0,
     ],
     (err, result) => {
       if (err) return res.status(500).json(err);
@@ -94,6 +97,16 @@ router.post("/coupons", adminAuth, (req, res) => {
           db.query(
             "INSERT INTO coupon_categories (coupon_id, category_id) VALUES (?,?)",
             [couponId, cid]
+          );
+        });
+      }
+
+      /* ================= USER MAPPING ================= */
+      if (selected_users.length) {
+        selected_users.forEach((uid) => {
+          db.query(
+            "INSERT INTO coupon_users (coupon_id, user_id) VALUES (?,?)",
+            [couponId, uid]
           );
         });
       }
@@ -130,12 +143,22 @@ router.get("/coupons/:id", adminAuth, (req, res) => {
       WHERE coupon_id = ?
     `;
 
+    /* GET USER MAPPINGS */
+    const userSql = `
+      SELECT user_id
+      FROM coupon_users
+      WHERE coupon_id = ?
+    `;
+
     db.query(productSql, [id], (err, products) => {
       db.query(categorySql, [id], (err, categories) => {
-        res.json({
-          ...coupon,
-          selected_products: products.map(p => p.product_id),
-          selected_categories: categories.map(c => c.category_id),
+        db.query(userSql, [id], (err, users) => {
+          res.json({
+            ...coupon,
+            selected_products: products.map(p => p.product_id),
+            selected_categories: categories.map(c => c.category_id),
+            selected_users: users.map(u => u.user_id),
+          });
         });
       });
     });
@@ -150,6 +173,7 @@ router.put("/coupons/:id", adminAuth, (req, res) => {
   const {
     selected_products = [],
     selected_categories = [],
+    selected_users = [],
     ...couponData
   } = req.body;
 
@@ -166,7 +190,8 @@ router.put("/coupons/:id", adminAuth, (req, res) => {
     expiry_date = ?,
     usage_limit = ?,
     usage_per_user = ?,
-    status = ?
+    status = ?,
+    is_hidden = ?
     WHERE id = ?
   `;
 
@@ -185,6 +210,7 @@ router.put("/coupons/:id", adminAuth, (req, res) => {
       couponData.usage_limit || null,
       couponData.usage_per_user || 1,
       couponData.status || "active",
+      couponData.is_hidden ? 1 : 0,
       id
     ],
     (err) => {
@@ -192,23 +218,32 @@ router.put("/coupons/:id", adminAuth, (req, res) => {
 
       db.query(`DELETE FROM coupon_products WHERE coupon_id = ?`, [id], () => {
         db.query(`DELETE FROM coupon_categories WHERE coupon_id = ?`, [id], () => {
+          db.query(`DELETE FROM coupon_users WHERE coupon_id = ?`, [id], () => {
 
-          selected_products.forEach(pid => {
-            db.query(
-              `INSERT INTO coupon_products (coupon_id, product_id) VALUES (?,?)`,
-              [id, pid]
-            );
+            selected_products.forEach(pid => {
+              db.query(
+                `INSERT INTO coupon_products (coupon_id, product_id) VALUES (?,?)`,
+                [id, pid]
+              );
+            });
+
+            selected_categories.forEach(cid => {
+              db.query(
+                `INSERT INTO coupon_categories (coupon_id, category_id) VALUES (?,?)`,
+                [id, cid]
+              );
+            });
+
+            selected_users.forEach(uid => {
+              db.query(
+                `INSERT INTO coupon_users (coupon_id, user_id) VALUES (?,?)`,
+                [id, uid]
+              );
+            });
+
+            res.json({ msg: "Coupon updated successfully" });
+
           });
-
-          selected_categories.forEach(cid => {
-            db.query(
-              `INSERT INTO coupon_categories (coupon_id, category_id) VALUES (?,?)`,
-              [id, cid]
-            );
-          });
-
-          res.json({ msg: "Coupon updated successfully" });
-
         });
       });
     }
