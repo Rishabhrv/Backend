@@ -41,7 +41,8 @@ router.get("/", (req, res) => {
       slug,
       profile_image,
       bio,
-      status
+      status,
+      is_featured
     FROM authors
     ORDER BY name ASC
     `,
@@ -52,6 +53,7 @@ router.get("/", (req, res) => {
   );
 });
 
+/* GET FEATURED HOME AUTHORS */
 router.get("/home-author", (req, res) => {
   db.query(
     `
@@ -61,23 +63,11 @@ router.get("/home-author", (req, res) => {
       a.slug, 
       a.profile_image, 
       a.bio, 
-      a.status
+      a.status,
+      a.is_featured
     FROM authors a
-    JOIN product_authors pa ON a.id = pa.author_id
-    JOIN product_categories pc ON pa.product_id = pc.product_id
-    JOIN categories c ON pc.category_id = c.id
-    WHERE c.imprint = 'agph'
-      AND a.slug IN (
-        'abhishek-singh',
-        'alkesh-khakre',
-        'dilliraja-sundar',
-        'dr-amit-kumar-meena',
-        'dr-anamika-das',
-        'dr-ashok-soni',
-        'dr-c-rama-rao',
-        'dr-dprakash',
-        'dr-ishwar-baburao-ghorude'
-      )
+    WHERE a.is_featured = 1
+      AND a.status = 'active'
     ORDER BY a.name ASC
     `,
     (err, rows) => {
@@ -91,22 +81,23 @@ router.get("/home-author", (req, res) => {
 
 /* ADD NEW AUTHOR */
 router.post("/", upload.single("profile_image"), (req, res) => {
-  const { name, bio } = req.body;
+  const { name, bio, is_featured } = req.body;
 
   if (!name) {
     return res.status(400).json({ message: "Author name required" });
   }
 
   const slug = generateSlug(name);
+  const featuredVal = (is_featured === "true" || is_featured === true || is_featured === 1 || is_featured === "1") ? 1 : 0;
 
   const imagePath = req.file
     ? `/uploads/authors/${req.file.filename}`
     : null;
 
   db.query(
-    `INSERT INTO authors (name, slug, profile_image, bio)
-     VALUES (?, ?, ?, ?)`,
-    [name, slug, imagePath, bio || null],
+    `INSERT INTO authors (name, slug, profile_image, bio, is_featured)
+     VALUES (?, ?, ?, ?, ?)`,
+    [name, slug, imagePath, bio || null, featuredVal],
     (err, result) => {
       if (err) {
         if (err.code === "ER_DUP_ENTRY") {
@@ -119,6 +110,7 @@ router.post("/", upload.single("profile_image"), (req, res) => {
         id: result.insertId,
         name,
         profile_image: imagePath,
+        is_featured: featuredVal,
       });
     }
   );
@@ -131,7 +123,7 @@ router.get("/:productId/authors", (req, res) => {
 
   db.query(
     `
-    SELECT a.id, a.bio, a.name, a.profile_image
+    SELECT a.id, a.bio, a.name, a.profile_image, a.is_featured
     FROM product_authors pa
     JOIN authors a ON a.id = pa.author_id
     WHERE pa.product_id = ?
@@ -144,11 +136,45 @@ router.get("/:productId/authors", (req, res) => {
   );
 });
 
+/* TOGGLE FEATURED (FOR TABLE TOGGLE BUTTON) */
+router.patch("/:id/toggle-featured", (req, res) => {
+  const { id } = req.params;
+  const { is_featured } = req.body || {};
+
+  let query;
+  let params;
+
+  if (typeof is_featured !== "undefined") {
+    const val = (is_featured === true || is_featured === 1 || is_featured === "1" || is_featured === "true") ? 1 : 0;
+    query = "UPDATE authors SET is_featured = ? WHERE id = ?";
+    params = [val, id];
+  } else {
+    query = "UPDATE authors SET is_featured = IF(is_featured = 1, 0, 1) WHERE id = ?";
+    params = [id];
+  }
+
+  db.query(query, params, (err) => {
+    if (err) {
+      console.error("Toggle featured error:", err);
+      return res.status(500).json({ message: "Failed to update featured status" });
+    }
+    db.query("SELECT id, name, is_featured FROM authors WHERE id = ?", [id], (err2, rows) => {
+      if (err2 || !rows.length) return res.json({ success: true, id: Number(id) });
+      res.json({ 
+        success: true, 
+        id: rows[0].id, 
+        name: rows[0].name, 
+        is_featured: rows[0].is_featured === 1 
+      });
+    });
+  });
+});
+
 /* UPDATE AUTHOR */
 router.put("/:id", upload.single("profile_image"), (req, res) => {
   const { id } = req.params;
-  // Extract slug from req.body
-  const { name, bio, status, slug } = req.body;
+  // Extract slug and is_featured from req.body
+  const { name, bio, status, slug, is_featured } = req.body;
 
   if (!name) {
     return res.status(400).json({ message: "Author name required" });
@@ -161,19 +187,24 @@ router.put("/:id", upload.single("profile_image"), (req, res) => {
     ? `/uploads/authors/${req.file.filename}`
     : null;
 
-  const sql = `
+  const hasFeatured = typeof is_featured !== "undefined";
+  const featuredVal = hasFeatured ? ((is_featured === "true" || is_featured === true || is_featured === 1 || is_featured === "1") ? 1 : 0) : null;
+
+  let sql = `
     UPDATE authors SET
       name = ?,
       slug = ?,
       bio = ?,
       status = ?
+      ${hasFeatured ? ", is_featured = ?" : ""}
       ${imagePath ? ", profile_image = ?" : ""}
     WHERE id = ?
   `;
 
-  const params = imagePath
-    ? [name, finalSlug, bio || null, status || "active", imagePath, id]
-    : [name, finalSlug, bio || null, status || "active", id];
+  const params = [name, finalSlug, bio || null, status || "active"];
+  if (hasFeatured) params.push(featuredVal);
+  if (imagePath) params.push(imagePath);
+  params.push(id);
 
   db.query(sql, params, (err) => {
     if (err) {
@@ -185,7 +216,8 @@ router.put("/:id", upload.single("profile_image"), (req, res) => {
 
     res.json({ 
       message: "Author updated successfully",
-      profile_image: imagePath 
+      profile_image: imagePath,
+      is_featured: featuredVal
     });
   });
 });
@@ -256,8 +288,29 @@ router.post("/bulk-status", (req, res) => {
   );
 });
 
+/* BULK FEATURED UPDATE */
+router.post("/bulk-featured", (req, res) => {
+  const { ids, is_featured } = req.body;
 
-/* ─── ADD THIS ROUTE TO YOUR author.js ─── */
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ message: "No IDs provided" });
+  }
+
+  const val = (is_featured === true || is_featured === 1 || is_featured === "1" || is_featured === "true") ? 1 : 0;
+
+  db.query(
+    "UPDATE authors SET is_featured = ? WHERE id IN (?)",
+    [val, ids],
+    (err) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ message: "Bulk featured update failed" });
+      }
+      res.json({ success: true, updatedCount: ids.length, is_featured: val });
+    }
+  );
+});
+
 
 /* GET SINGLE AUTHOR BY SLUG + THEIR BOOKS */
 router.get("/slug/:slug", (req, res) => {
@@ -265,7 +318,7 @@ router.get("/slug/:slug", (req, res) => {
 
   // First get the author
   db.query(
-    `SELECT id, name, slug, profile_image, bio, status, created_at
+    `SELECT id, name, slug, profile_image, bio, status, is_featured, created_at
      FROM authors WHERE slug = ? AND status = 'active'`,
     [slug],
     (err, authors) => {
